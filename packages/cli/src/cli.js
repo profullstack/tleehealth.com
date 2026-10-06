@@ -3,7 +3,7 @@
  *
  *   tleehealth schedule [--date today|tomorrow|YYYY-MM-DD] [--json]
  *   tleehealth caseload [--month YYYY-MM] [--all] [--json]
- *   tleehealth superbill [--month YYYY-MM] [--rule full|midpoint] [--csv] [--json]
+ *   tleehealth superbill [--month YYYY-MM] [--csv] [--json]
  *   tleehealth log-time PROGRAM_ID MINUTES [--activity A] [--note TEXT] [--date YYYY-MM-DD]
  *   tleehealth health
  *   tleehealth login [KEY]
@@ -19,8 +19,7 @@ const HELP = `tleehealth: telehealth and practice management.
 
   tleehealth schedule [--date today|tomorrow|YYYY-MM-DD] [--json]   the front-desk day
   tleehealth caseload [--month YYYY-MM] [--all] [--json]            navigation patients and minutes this month
-  tleehealth superbill [--month YYYY-MM] [--rule full|midpoint] [--csv]
-                                                                    billable PIN/CHI/CCM codes for the month
+  tleehealth superbill [--month YYYY-MM] [--csv]                    billable PIN/CHI/CCM codes for the month
   tleehealth log-time PROGRAM_ID MINUTES [--activity A] [--note T] [--date YYYY-MM-DD]
   tleehealth health                                                 is the API up
   tleehealth login [KEY]                                            save an API key
@@ -70,7 +69,7 @@ export function formatCaseload(c) {
 }
 
 export function formatSuperbill(sb) {
-  const lines = [`superbill ${sb.month} (${sb.rule} time): ${sb.ready} ready, ${sb.held} on hold, ${sb.under} under threshold`];
+  const lines = [`superbill ${sb.month}: ${sb.ready} ready, ${sb.held} on hold, ${sb.under} under threshold`];
   for (const r of sb.rows)
     lines.push(
       `${(r.patient ?? '').padEnd(18)} ${r.program_name.padEnd(7)} ${String(r.minutes).padStart(4)} min  ${(codes(r) || '-').padEnd(16)} ${r.ready ? 'ready' : r.lines.length ? `hold: ${r.blockers.join('; ')}` : `${r.next_unit_in} min short`}`,
@@ -105,7 +104,7 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
     case 'superbill': {
-      const sb = await superbill(auth, { org: flags.org, month: flags.month, rule: flags.rule, csv: Boolean(flags.csv) });
+      const sb = await superbill(auth, { org: flags.org, month: flags.month, csv: Boolean(flags.csv) });
       console.log(flags.csv ? sb.trimEnd() : flags.json ? JSON.stringify(sb, null, 2) : formatSuperbill(sb));
       return 0;
     }

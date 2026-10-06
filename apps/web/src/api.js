@@ -714,7 +714,7 @@ async function carePlan(patientId) {
 }
 
 /** Enrollments with their minutes in a month, decorated with codes and blockers. */
-async function programRows(orgId, { start, end, month }, filter, rule = 'full') {
+async function programRows(orgId, { start, end, month }, filter) {
   const sql = db();
   const rows = await sql`
     select cp.*, p.name as patient, p.dob, bp.name as billing_provider, bp.npi as billing_npi, nv.name as navigator,
@@ -726,7 +726,7 @@ async function programRows(orgId, { start, end, month }, filter, rule = 'full') 
     where cp.org_id = ${orgId} ${filter(sql)}
     order by p.name nulls last, cp.program`;
   return rows.map((r) => ({
-    ...nav.superbillRow(r, r.minutes, month, rule),
+    ...nav.superbillRow(r, r.minutes, month),
     status: r.status,
     navigator_id: r.navigator_id,
     billing_provider_id: r.billing_provider_id,
@@ -736,7 +736,7 @@ async function programRows(orgId, { start, end, month }, filter, rule = 'full') 
   }));
 }
 
-api.get('/navigation/programs', (c) => c.json({ programs: nav.PROGRAMS, activities: nav.ACTIVITIES, time_rules: nav.TIME_RULES }));
+api.get('/navigation/programs', (c) => c.json({ programs: nav.PROGRAMS, activities: nav.ACTIVITIES }));
 
 api.get('/orgs/:org/patients/:id/care-plan', async (c) => {
   const { me, user } = await member(c, c.req.param('org'));
@@ -945,19 +945,16 @@ api.get('/orgs/:org/caseload', async (c) => {
   return c.json({ month: m.month, mine, caseload: rows });
 });
 
-/** Everything billable in a month. ?rule=full|midpoint, ?format=csv. */
+/** Everything billable in a month. ?format=csv. Units need their full time (see navigation.js). */
 api.get('/orgs/:org/superbill', async (c) => {
   const { me, user } = await member(c, c.req.param('org'), BILLERS);
   const m = monthOf(c);
-  const rule = c.req.query('rule') ?? 'full';
-  if (!nav.TIME_RULES.includes(rule)) fail(400, 'rule must be full or midpoint');
   // Every enrollment that overlapped the month and has time in it.
   const rows = (
     await programRows(
       me.org_id,
       m,
       (sql) => sql`and cp.started_on < ${m.end} and (cp.ended_on is null or cp.ended_on >= ${m.start})`,
-      rule,
     )
   ).filter((r) => r.minutes > 0);
   rows.sort((a, b) => Number(b.ready) - Number(a.ready));
@@ -972,7 +969,6 @@ api.get('/orgs/:org/superbill', async (c) => {
   for (const r of rows) if (r.ready) for (const l of r.lines) totals[l.code] = (totals[l.code] ?? 0) + l.units;
   return c.json({
     month: m.month,
-    rule,
     rows,
     totals,
     ready: rows.filter((r) => r.ready).length,

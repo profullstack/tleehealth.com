@@ -5,12 +5,14 @@
  * they add up to. Prices vary by locality and change yearly, so none are kept
  * here; a superbill lists codes and units, and the biller prices them.
  *
- * Time rules. "full" counts a unit only when its whole time is met: G0023 at 60
- * minutes, each G0024 at another 30. "midpoint" applies the CPT rule that a unit
- * of time is attained once its midpoint is passed (G0023 at 31, G0024 at 16 more).
- * Whether a practice's payer accepts the midpoint for these codes is the biller's
- * call, so full is the default. CCM's codes say "at least 20 minutes" in the
- * descriptor, so the midpoint never applies to them.
+ * A unit counts only when its whole time is met: G0023 at 60 minutes, each G0024
+ * at another 30. The CPT "midpoint" rule (a unit at 31 minutes) does NOT apply to
+ * these codes. CMS, CY2024 PFS final rule, 88 FR 78941: "if a patient requires
+ * less than 60 minutes per month for PIN services, then their needs may be best
+ * suited to other types of care management services." CMS also declined shorter
+ * increments for CHI (88 FR 78925), and the CY2025/2026 rules kept the 60 minutes.
+ * CCM's descriptors say "at least 20 minutes". Never add a midpoint option back:
+ * it would bill Medicare for time not spent.
  */
 
 export const PROGRAMS = {
@@ -44,7 +46,6 @@ export const PROGRAMS = {
     first: { code: '99490', minutes: 20 },
     addon: { code: '99439', minutes: 20, max: 2 },
     yearlyConsent: false,
-    exactTime: true,
     needsCarePlan: true,
     about: 'Two or more chronic conditions expected to last 12 months or more, with a care plan.',
   },
@@ -63,29 +64,21 @@ export const ACTIVITIES = [
   'other',
 ];
 
-export const TIME_RULES = ['full', 'midpoint'];
-
-/** Minutes past which a unit of `minutes` counts under a rule. */
-function threshold(minutes, rule, exactTime) {
-  return rule === 'midpoint' && !exactTime ? Math.floor(minutes / 2) + 1 : minutes;
-}
-
 /**
  * What a month's minutes bill under a program: [{ code, units }], and how many
  * more minutes reach the next unit (null when the add-on is capped out).
  */
-export function unitsFor(program, totalMinutes, rule = 'full') {
+export function unitsFor(program, totalMinutes) {
   const p = PROGRAMS[program];
   if (!p) throw new Error(`unknown program ${program}`);
   const total = Math.max(0, Math.floor(totalMinutes || 0));
-  const firstAt = threshold(p.first.minutes, rule, p.exactTime);
+  const firstAt = p.first.minutes;
   if (total < firstAt) return { lines: [], next: firstAt - total };
 
   const lines = [{ code: p.first.code, units: 1 }];
-  // Add-on units start counting after the first code's full time, even under the
-  // midpoint rule: the first unit has to be complete before the next one begins.
+  // Add-on units start counting after the first code's full time.
   const past = total - p.first.minutes;
-  const addAt = threshold(p.addon.minutes, rule, p.exactTime);
+  const addAt = p.addon.minutes;
   let addUnits = past < addAt ? 0 : 1 + Math.floor((past - addAt) / p.addon.minutes);
   if (p.addon.max != null) addUnits = Math.min(addUnits, p.addon.max);
   if (addUnits) lines.push({ code: p.addon.code, units: addUnits });
@@ -141,8 +134,8 @@ export function blockers(enrollment, month) {
 }
 
 /** One superbill row per enrollment with time this month. */
-export function superbillRow(enrollment, minutes, month, rule) {
-  const { lines, next } = unitsFor(enrollment.program, minutes, rule);
+export function superbillRow(enrollment, minutes, month) {
+  const { lines, next } = unitsFor(enrollment.program, minutes);
   const blocked = blockers(enrollment, month);
   return {
     program_id: enrollment.id,

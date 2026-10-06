@@ -13,18 +13,16 @@ describe('units', () => {
     expect(unitsFor('pin', 150).lines[1]).toEqual({ code: 'G0024', units: 3 });
   });
 
-  test('PIN under the midpoint rule: G0023 at 31, G0024 at 16 past the full hour', () => {
-    expect(unitsFor('pin', 30, 'midpoint').lines).toEqual([]);
-    expect(unitsFor('pin', 31, 'midpoint')).toEqual({ lines: [{ code: 'G0023', units: 1 }], next: 45 });
-    expect(unitsFor('pin', 75, 'midpoint').lines).toHaveLength(1);
-    expect(unitsFor('pin', 76, 'midpoint').lines[1]).toEqual({ code: 'G0024', units: 1 });
-    expect(unitsFor('pin', 106, 'midpoint').lines[1]).toEqual({ code: 'G0024', units: 2 });
+  test('no rounding up: 31 minutes of PIN bills nothing, 76 bills no add-on (CMS, 88 FR 78941)', () => {
+    expect(unitsFor('pin', 31)).toEqual({ lines: [], next: 29 });
+    expect(unitsFor('pin', 76).lines).toEqual([{ code: 'G0023', units: 1 }]);
+    expect(unitsFor('chi', 59).lines).toEqual([]);
   });
 
-  test('CCM needs full time under either rule, and 99439 caps at two', () => {
-    expect(unitsFor('ccm', 19, 'midpoint').lines).toEqual([]);
+  test('CCM needs its full 20 minutes, and 99439 caps at two', () => {
+    expect(unitsFor('ccm', 19).lines).toEqual([]);
     expect(unitsFor('ccm', 20).lines).toEqual([{ code: '99490', units: 1 }]);
-    expect(unitsFor('ccm', 40, 'midpoint').lines[1]).toEqual({ code: '99439', units: 1 });
+    expect(unitsFor('ccm', 40).lines[1]).toEqual({ code: '99439', units: 1 });
     expect(unitsFor('ccm', 200)).toEqual({ lines: [{ code: '99490', units: 1 }, { code: '99439', units: 2 }], next: null });
   });
 
@@ -216,9 +214,7 @@ describe.skipIf(!configured())('navigation api', () => {
     expect(sb.body.ready).toBe(1);
     expect(sb.body.totals).toEqual({ G0023: 1 });
     expect(sb.body.rows[0].billing_npi).toBe('1234567893');
-    const mid = await owner.get(`/orgs/${orgId}/superbill?month=${month}&rule=midpoint`);
-    expect(mid.body.rows[0].next_unit_in).toBe(11); // 60 + 16 - 65
-    expect((await owner.get(`/orgs/${orgId}/superbill?month=${month}&rule=loose`)).status).toBe(400);
+    expect(sb.body.rows[0].next_unit_in).toBe(25); // G0024 at 90
     const csv = await owner.get(`/orgs/${orgId}/superbill?month=${month}&format=csv`);
     expect(csv.headers.get('content-type')).toContain('text/csv');
     expect(csv.body).toContain('Rosa Diaz,1951-07-04,PIN,Stage III colon cancer');

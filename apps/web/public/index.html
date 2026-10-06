@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tleehealth: the practice that runs itself</title>
-<meta name="description" content="Telehealth and practice management with an AI agent that calls every patient. Scheduling, prescriptions, labs and health-record import. $10 per seat or $199 for up to 1,000.">
+<meta name="description" content="Telehealth and practice management with an AI agent that calls every patient. Scheduling, prescriptions, labs, care plans and Medicare navigation billing. $10 per seat or $199 for up to 1,000.">
 <link rel="canonical" href="https://tleehealth.com/">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -29,6 +29,7 @@ a{color:#ECEEE6}a:hover{color:#FFFFFF}
       </a>
       <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 28px; font-size: 15px; color: #A3ACA6">
         <a href="#product" style="color: #A3ACA6; text-decoration: none">Product</a>
+        <a href="#navigation" style="color: #A3ACA6; text-decoration: none">Get paid</a>
         <a href="#agents" style="color: #A3ACA6; text-decoration: none">Agents</a>
         <a href="#import" style="color: #A3ACA6; text-decoration: none">Import</a>
         <a href="#developers" style="color: #A3ACA6; text-decoration: none">Developers</a>
@@ -140,6 +141,74 @@ a{color:#ECEEE6}a:hover{color:#FFFFFF}
     </div>
   </section>
 
+  <!-- Navigation billing -->
+  <section id="navigation" style="border-top: 1px solid #1E2522; background: #0C100F">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 96px 24px; display: flex; flex-wrap: wrap; gap: 56px; align-items: center">
+      <div style="flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+        <div style="font-family: 'Geist Mono', monospace; font-size: 13px; letter-spacing: 0.08em; color: #E6E39A">GET PAID FOR COORDINATION</div>
+        <h2 style="margin: 0; font-size: clamp(32px, 4vw, 52px); letter-spacing: -0.035em; line-height: 1.02; font-weight: 600">Medicare pays for the help your staff already gives.</h2>
+        <p style="margin: 0; color: #A3ACA6; font-size: 17px; line-height: 1.55">Chasing a prior authorization. Booking the oncologist. Finding a ride to infusion. Since 2024 Medicare pays practices for this work, roughly $75 to $100 a month per patient for the first hour, depending on where you practice. Most practices never bill it, because nobody counts the minutes.</p>
+        <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 15px; line-height: 1.5">
+          <li style="display: flex; gap: 14px; align-items: baseline"><span style="font-family: 'Geist Mono', monospace; color: #E6E39A">01</span><span><b style="font-weight: 600">Your advocate logs the time.</b> <span style="color: #A3ACA6">A staff member helps a patient, picks what they did and how long it took. The care plan keeps the goals and who owes what.</span></span></li>
+          <li style="display: flex; gap: 14px; align-items: baseline"><span style="font-family: 'Geist Mono', monospace; color: #E6E39A">02</span><span><b style="font-weight: 600">The month adds itself up.</b> <span style="color: #A3ACA6">Minutes turn into billing codes per patient, and the caseload shows how close each one is to the next.</span></span></li>
+          <li style="display: flex; gap: 14px; align-items: baseline"><span style="font-family: 'Geist Mono', monospace; color: #E6E39A">03</span><span><b style="font-weight: 600">Hand your biller a superbill.</b> <span style="color: #A3ACA6">One spreadsheet of what to claim, with anything that would get a claim rejected (missing consent, no qualifying visit, no NPI) held back and named.</span></span></li>
+        </ol>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px">
+          <div style="border: 1px solid #2E3122; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+            <div style="font-size: 15px; font-weight: 600">Illness navigation</div>
+            <div style="font-size: 13px; color: #8A948E; line-height: 1.45">One serious condition, like cancer or heart failure</div>
+            <div style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #E6E39A">G0023 · G0024</div>
+          </div>
+          <div style="border: 1px solid #2E3122; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+            <div style="font-size: 15px; font-weight: 600">Community health</div>
+            <div style="font-size: 13px; color: #8A948E; line-height: 1.45">Housing, food or transport in the way of treatment</div>
+            <div style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #E6E39A">G0019 · G0022</div>
+          </div>
+          <div style="border: 1px solid #2E3122; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+            <div style="font-size: 15px; font-weight: 600">Chronic care</div>
+            <div style="font-size: 13px; color: #8A948E; line-height: 1.45">Two or more long-term conditions, with a care plan</div>
+            <div style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #E6E39A">99490 · 99439</div>
+          </div>
+        </div>
+        <p style="margin: 0; color: #6E7872; font-size: 13px; line-height: 1.5">Your practice submits the claims; tleehealth keeps the record and does the math. Rates vary by locality and payer.</p>
+      </div>
+
+      <!-- Superbill preview -->
+      <div style="flex: 1 1 420px; min-width: 0; background: #0F1412; border: 1px solid #222A27; border-radius: 18px; overflow: hidden; box-shadow: 0 40px 80px rgba(0,0,0,0.45)">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #1E2522">
+          <div style="font-size: 14px; font-weight: 600">Superbill · October</div>
+          <div style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8A948E">2 ready · 1 on hold</div>
+        </div>
+        <ul style="list-style: none; margin: 0; padding: 8px 0; font-size: 14px">
+          <li style="display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; padding: 14px 18px; align-items: center">
+            <span>Rosa D.<br><span style="color: #8A948E; font-size: 13px">Illness navigation · 105 min</span></span>
+            <span style="font-family: 'Geist Mono', monospace; font-size: 13px">G0023 + G0024</span>
+            <span style="font-size: 11px; padding: 3px 8px; border-radius: 99px; background: #15302A; color: #9AF5C4">ready</span>
+          </li>
+          <li style="display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; padding: 14px 18px; align-items: center">
+            <span>Marcus O.<br><span style="color: #8A948E; font-size: 13px">Chronic care · 42 min</span></span>
+            <span style="font-family: 'Geist Mono', monospace; font-size: 13px">99490 + 99439</span>
+            <span style="font-size: 11px; padding: 3px 8px; border-radius: 99px; background: #15302A; color: #9AF5C4">ready</span>
+          </li>
+          <li style="display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; padding: 14px 18px; align-items: center; background: #17180F">
+            <span>Walt K.<br><span style="color: #8A948E; font-size: 13px">Community health · 64 min</span></span>
+            <span style="font-family: 'Geist Mono', monospace; font-size: 13px">G0019</span>
+            <span style="font-size: 11px; padding: 3px 8px; border-radius: 99px; background: #26291A; color: #E6E39A">hold</span>
+          </li>
+          <li style="padding: 0 18px 12px; color: #E6E39A; font-size: 13px">Walt K.: consent is over a year old; renew it</li>
+        </ul>
+        <div style="padding: 14px 18px 18px; border-top: 1px solid #1E2522; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; justify-content: space-between; font-family: 'Geist Mono', monospace; font-size: 12px; color: #8A948E"><span>Rosa D. · progress to the next add-on</span><span>15 min to go</span></div>
+          <div style="height: 6px; border-radius: 99px; background: #1C2220; overflow: hidden"><div style="width: 50%; height: 100%; background: #7CF2B0; border-radius: 99px"></div></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 4px">
+            <span style="font-size: 13px; color: #A3ACA6">Ready to bill: G0023 ×1 · G0024 ×1 · 99490 ×1 · 99439 ×1</span>
+            <span style="font-size: 13px; padding: 8px 12px; border-radius: 9px; background: #7CF2B0; color: #0A0D0C; font-weight: 600; white-space: nowrap">Download CSV</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Import -->
   <section id="import" style="border-top: 1px solid #1E2522; border-bottom: 1px solid #1E2522; background: #0C100F">
     <div style="max-width: 1200px; margin: 0 auto; padding: 96px 24px; display: flex; flex-wrap: wrap; gap: 56px; align-items: center">
@@ -197,6 +266,7 @@ a{color:#ECEEE6}a:hover{color:#FFFFFF}
       <span style="padding: 8px 14px; border-radius: 99px; background: #15302A; color: #9AF5C4">Org manager</span>
       <span style="padding: 8px 14px; border-radius: 99px; background: #15302A; color: #9AF5C4">Provider</span>
       <span style="padding: 8px 14px; border-radius: 99px; background: #15302A; color: #9AF5C4">Staff</span>
+      <span style="padding: 8px 14px; border-radius: 99px; background: #15302A; color: #9AF5C4">Advocate</span>
       <span style="color: #8A948E; margin: 0 6px 0 16px">Always free:</span>
       <span style="padding: 8px 14px; border-radius: 99px; border: 1px solid #2C3531; color: #ECEEE6">Patients</span>
       <span style="padding: 8px 14px; border-radius: 99px; border: 1px solid #2C3531; color: #ECEEE6">Leads</span>
@@ -236,6 +306,7 @@ a{color:#ECEEE6}a:hover{color:#FFFFFF}
           <pre style="margin: 0; padding: 18px 16px; font-family: 'Geist Mono', monospace; font-size: 13px; line-height: 1.7; color: #C9D0CA; overflow-x: auto"><span style="color: #7CF2B0">$</span> tleehealth login
 <span style="color: #7CF2B0">$</span> tleehealth schedule today --location mission-st
 <span style="color: #7CF2B0">$</span> tleehealth invite dr.lin@example.com --type provider
+<span style="color: #7CF2B0">$</span> tleehealth superbill --month 2026-10 --csv
 <span style="color: #7CF2B0">$</span> tleehealth tui</pre>
         </div>
       </div>

@@ -151,7 +151,7 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - PATCH /orgs/:org/programs/:id             consent (renews it), billing practitioner, end
 - POST /orgs/:org/programs/:id/time         log navigation minutes ({"minutes", "activity", "note", "performed_on"})
 - GET /orgs/:org/caseload?month=YYYY-MM     enrollments, minutes toward G0023/G0024, G0019/G0022, 99490/99439, open tasks
-- GET /orgs/:org/superbill?month=YYYY-MM&rule=full|midpoint&format=csv
+- GET /orgs/:org/superbill?month=YYYY-MM&format=csv
                                             the month's billable codes per patient, ready or on hold with the reason
 
 ## Tools
