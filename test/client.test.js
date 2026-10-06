@@ -29,7 +29,7 @@ describe('cli', () => {
     expect(c).toContain('caseload 2026-10 (mine)');
     expect(c).toContain('G0023 + G0024');
     expect(c).toContain('25 min to next');
-    const sb = formatSuperbill({ month: '2026-10', rule: 'full', ready: 1, held: 0, under: 0, rows: [row], totals: { G0023: 1, G0024: 1 } });
+    const sb = formatSuperbill({ month: '2026-10', ready: 1, held: 0, under: 0, rows: [row], totals: { G0023: 1, G0024: 1 } });
     expect(sb).toContain('ready to bill: G0023 x1, G0024 x1');
   });
 });

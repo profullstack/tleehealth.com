@@ -35,12 +35,11 @@ const TOOLS = [
   {
     name: 'get_superbill',
     description:
-      "The month's billable care-management codes per patient: program, condition, billing practitioner and NPI, minutes, codes and units, and ready / on hold (with the reason) / under threshold. Owners, org managers and providers only. rule 'midpoint' applies the CPT midpoint time rule; 'full' (default) needs each unit's whole time.",
+      "The month's billable care-management codes per patient: program, condition, billing practitioner and NPI, minutes, codes and units, and ready / on hold (with the reason) / under threshold. Owners, org managers and providers only. A code counts only when its full time is met (60 minutes for G0023, 30 per add-on, 20 for CCM).",
     inputSchema: {
       type: 'object',
       properties: {
         month: { type: 'string', description: 'YYYY-MM; default this month' },
-        rule: { type: 'string', enum: ['full', 'midpoint'] },
         csv: { type: 'boolean', description: 'return the CSV for a biller instead of JSON' },
         org: { type: 'string' },
       },

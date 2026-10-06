@@ -95,9 +95,9 @@ export async function caseload(auth, { org, month, all } = {}) {
 }
 
 /** The month's billable care-management codes. csv: true returns the CSV text. */
-export async function superbill(auth, { org, month, rule = 'full', csv = false } = {}) {
+export async function superbill(auth, { org, month, csv = false } = {}) {
   const id = await resolveOrg(auth, org);
-  return call(auth, `/api/v1/orgs/${id}/superbill?month=${monthParam(month)}&rule=${encodeURIComponent(rule)}${csv ? '&format=csv' : ''}`);
+  return call(auth, `/api/v1/orgs/${id}/superbill?month=${monthParam(month)}${csv ? '&format=csv' : ''}`);
 }
 
 /** Log navigation minutes against a program enrollment. */

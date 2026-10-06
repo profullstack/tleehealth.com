@@ -1014,9 +1014,8 @@ async function viewCaseload(q) {
 
 async function viewSuperbill(q) {
   const month = q.get('month') ?? thisMonthISO();
-  const rule = q.get('rule') === 'midpoint' ? 'midpoint' : 'full';
-  const sb = await get(`/orgs/${state.orgId}/superbill?month=${month}&rule=${rule}`);
-  const link = (m, r = rule) => `/app/superbill?month=${m}${r === 'midpoint' ? '&rule=midpoint' : ''}`;
+  const sb = await get(`/orgs/${state.orgId}/superbill?month=${month}`);
+  const link = (m) => `/app/superbill?month=${m}`;
   const totals = Object.entries(sb.totals);
   const html = `
   <div class="head">
@@ -1025,8 +1024,7 @@ async function viewSuperbill(q) {
       <a class="btn sm" href="${link(shiftMonth(month, -1))}" aria-label="Previous month">‹</a>
       <a class="btn sm" href="${link(thisMonthISO())}">This month</a>
       <a class="btn sm" href="${link(shiftMonth(month, 1))}" aria-label="Next month">›</a>
-      <select id="rule" class="inline" aria-label="Time rule"><option value="full" ${rule === 'full' ? 'selected' : ''}>Full time per unit</option><option value="midpoint" ${rule === 'midpoint' ? 'selected' : ''}>Midpoint rule</option></select>
-      <a class="btn primary sm" href="/api/v1/orgs/${state.orgId}/superbill?month=${month}&rule=${rule}&format=csv" download>Download CSV</a>
+      <a class="btn primary sm" href="/api/v1/orgs/${state.orgId}/superbill?month=${month}&format=csv" download>Download CSV</a>
     </div>
   </div>
   <div class="cols">
@@ -1050,16 +1048,13 @@ async function viewSuperbill(q) {
       }</section>
       <section class="card"><div class="card-b dim small stack">
         <span>One line per code, per patient, per month, for your biller or clearinghouse. Prices vary by locality, so none are shown.</span>
-        <span><b>Full time</b> counts a unit only when its whole time is met. <b>Midpoint</b> applies the CPT rule (G0023 at 31 minutes); check that your payers accept it before using it. CCM always needs its full 20 minutes.</span>
+        <span>A code counts only when its full time is met: 60 minutes for G0023 (and G0019, G0140), 30 more for each add-on, 20 for CCM. Medicare does not allow rounding up from 31 minutes on these codes.</span>
         <span>On hold means a claim would be missing something: consent (renewed yearly for PIN and CHI), the initiating visit, the billing practitioner's NPI, or for CCM a care plan.</span>
       </div></section>
     </div>
   </div>`;
   return {
     html,
-    bind() {
-      document.getElementById('rule').onchange = (e) => go(link(month, e.target.value));
-    },
   };
 }
 

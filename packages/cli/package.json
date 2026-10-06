@@ -1,6 +1,6 @@
 {
   "name": "@profullstack/tleehealth",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "tleehealth from the terminal: the CLI, the front-desk TUI, and the API client the MCP server uses.",
   "type": "module",
   "license": "MIT",
