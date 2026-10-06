@@ -328,6 +328,10 @@ describe.skipIf(!configured())('records api', () => {
     const z = await owner('GET', `/orgs/${orgId}/patients/${patientId}/records/export`);
     expect(z.headers.get('content-type')).toBe('application/zip');
 
+    const log = (await patient('GET', '/records/access')).body.access;
+    expect(log.map((a) => a.action)).toEqual(expect.arrayContaining(['records.share', 'records.read', 'records.file', 'records.export']));
+    expect(log.find((a) => a.action === 'records.read')).toMatchObject({ org_name: `Records Practice ${tag}`, you: false });
+
     await patient('PUT', `/records/connections/${connId}/share`, { org_id: orgId, shared: false });
     expect((await owner('GET', `/orgs/${orgId}/patients/${patientId}/records`)).body.total).toBe(0);
   });
