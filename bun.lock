@@ -41,7 +41,7 @@
         "tleehealth-mcp": "./bin/tleehealth-mcp.mjs",
       },
       "dependencies": {
-        "@profullstack/tleehealth": "^0.1.0",
+        "@profullstack/tleehealth": "^0.2.0",
       },
     },
     "packages/payments": {

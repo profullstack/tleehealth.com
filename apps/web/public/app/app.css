@@ -52,8 +52,8 @@ h2 { font-size: 16px; }
 .head { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .cols { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-.cols > .wide { flex: 3 1 520px; min-width: 0; }
-.cols > .narrow { flex: 2 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.cols > .wide { flex: 3 1 680px; min-width: 0; }
+.cols > .narrow { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
 
 /* cards + tables */

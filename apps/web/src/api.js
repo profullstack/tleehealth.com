@@ -5,6 +5,7 @@ import { getCookie } from 'hono/cookie';
 import * as auth from './auth.js';
 import { config, monthlyCents } from './config.js';
 import { sendAddedToOrg, sendLoginLink } from './mail.js';
+import * as calls from './calls.js';
 
 /**
  * /api/v1: the only thing any client talks to. The browser app, the CLI, the TUI
@@ -317,9 +318,9 @@ api.post('/orgs/:org/people', async (c) => {
     if (dup) return c.json({ error: 'someone with that email is already in this practice', id: dup.id }, 409);
   }
   const [p] = await sql`
-    insert into org_people (org_id, user_type, name, email, phone, dob, source, notes)
+    insert into org_people (org_id, user_type, name, email, phone, dob, source, notes, call_consent_at)
     values (${me.org_id}, ${type}, ${name}, ${email}, ${str(b.phone, 40)}, ${str(b.dob, 10)},
-            ${str(b.source, 80)}, ${str(b.notes, 2000)})
+            ${str(b.source, 80)}, ${str(b.notes, 2000)}, ${b.call_consent === true ? new Date() : null})
     returning *`;
   if (Array.isArray(b.location_ids))
     for (const lid of b.location_ids.filter((x) => UUID.test(x)))
@@ -357,8 +358,15 @@ api.patch('/orgs/:org/people/:id', async (c) => {
   const [row] = await db()`
     update org_people set user_type = ${type},
       name = coalesce(${str(b.name, 120)}, name), phone = coalesce(${str(b.phone, 40)}, phone),
-      dob = coalesce(${str(b.dob, 10)}, dob), notes = coalesce(${str(b.notes, 2000)}, notes)
+      dob = coalesce(${str(b.dob, 10)}, dob), notes = coalesce(${str(b.notes, 2000)}, notes),
+      call_consent_at = case when ${b.call_consent === true} then coalesce(call_consent_at, now())
+                             when ${b.call_consent === false} then null else call_consent_at end,
+      call_opt_out_at = case when ${b.call_consent === true} then null else call_opt_out_at end
     where id = ${p.id} returning *`;
+  if (b.call_consent !== undefined) {
+    const upcoming = await db()`select id from appointments where patient_id = ${p.id} and starts_at > now() - interval '3 days'`;
+    for (const a of upcoming) await calls.syncAppointmentCalls(a.id);
+  }
   await audit(me.org_id, user.id, 'person.update', p.id);
   return c.json({ person: row });
 });
@@ -392,8 +400,11 @@ api.get('/orgs/:org/patients/:id', async (c) => {
     sql`select r.*, m.name as medication from refill_requests r join medications m on m.id = r.medication_id
         where r.patient_id = ${p.id} order by r.requested_at desc limit 50`,
   ]);
+  const callRows = await sql`select id, appointment_id, kind, status, due_at, summary, flagged, flag_reason, resolved_at,
+                                    skip_reason, attempts, ended_at, transcript is not null as has_transcript
+                             from calls where patient_id = ${p.id} order by coalesce(ended_at, due_at) desc limit 50`;
   await audit(me.org_id, user.id, 'patient.read', p.id);
-  return c.json({ patient: p, appointments, medications, labs, summaries, refills });
+  return c.json({ patient: p, appointments, medications, labs, summaries, refills, calls: callRows });
 });
 
 /* ------------------------------------------------------------ scheduling -- */
@@ -443,6 +454,9 @@ api.post('/orgs/:org/appointments', async (c) => {
   const [a] = await sql.begin(async (tx) => {
     // Booking a lead makes them a patient.
     if (patient.user_type === 'lead') await tx`update org_people set user_type = 'patient' where id = ${patient.id}`;
+    // The front desk asks at booking; a yes is recorded with its time.
+    if (b.call_consent === true)
+      await tx`update org_people set call_consent_at = coalesce(call_consent_at, now()), call_opt_out_at = null where id = ${patient.id}`;
     return tx`
       insert into appointments (org_id, location_id, provider_id, patient_id, starts_at, minutes, mode, reason, created_by)
       values (${me.org_id}, ${locationId}, ${provider?.id ?? null}, ${patient.id}, ${starts},
@@ -450,6 +464,7 @@ api.post('/orgs/:org/appointments', async (c) => {
       returning *`;
   });
   await audit(me.org_id, user.id, 'appointment.create', a.id);
+  await calls.syncAppointmentCalls(a.id);
   return c.json({ appointment: a }, 201);
 });
 
@@ -477,6 +492,7 @@ api.patch('/orgs/:org/appointments/:id', async (c) => {
     where id = ${uuid(c.req.param('id'))} and org_id = ${me.org_id} returning *`;
   if (!a) return c.json({ error: 'no such appointment' }, 404);
   await audit(me.org_id, user.id, `appointment.update${b.status ? `.${b.status}` : ''}`, a.id);
+  await calls.syncAppointmentCalls(a.id);
   return c.json({ appointment: a });
 });
 
@@ -673,7 +689,17 @@ api.get('/orgs/:org/today', async (c) => {
     sql`select s.id, s.appointment_id, p.name as patient, p.id as patient_id from visit_summaries s join org_people p on p.id = s.patient_id
         where s.org_id = ${me.org_id} and s.status = 'draft' order by s.updated_at desc limit 50`,
   ]);
-  return c.json({ date, appointments, needs: { refills, labs, summaries } });
+  const ids = appointments.map((a) => a.id);
+  const dayCalls = ids.length
+    ? await sql`select id, appointment_id, kind, status, due_at, next_attempt_at, summary, flagged, skip_reason
+                from calls where appointment_id = any(${ids})`
+    : [];
+  for (const a of appointments) a.calls = dayCalls.filter((x) => x.appointment_id === a.id);
+  const flagged = await sql`
+    select c.id, c.kind, c.summary, c.flag_reason, c.ended_at, p.name as patient, p.id as patient_id, p.phone
+    from calls c join org_people p on p.id = c.patient_id
+    where c.org_id = ${me.org_id} and c.flagged and c.resolved_at is null order by c.ended_at desc limit 50`;
+  return c.json({ date, appointments, needs: { calls: flagged, refills, labs, summaries } });
 });
 
 /** The CLI/TUI/MCP shape: ?org= or the caller's first practice. */
@@ -740,9 +766,33 @@ api.get('/portal', async (c) => {
           where s.patient_id = ${p.id} and s.status = 'signed' order by s.signed_at desc limit 20`,
     ]);
     await audit(p.org_id, user.id, 'portal.read', p.id);
-    practices.push({ org: { id: p.org_id, name: p.org_name }, patient_id: p.id, appointments, medications, labs, summaries });
+    practices.push({
+      org: { id: p.org_id, name: p.org_name },
+      patient_id: p.id,
+      calls_ok: Boolean(p.call_consent_at && !p.call_opt_out_at),
+      appointments,
+      medications,
+      labs,
+      summaries,
+    });
   }
   return c.json({ practices });
+});
+
+api.post('/portal/calls', async (c) => {
+  const user = await requireUser(c);
+  const b = await body(c);
+  const mine = (await myPatientRows(user)).find((p) => p.org_id === b.org_id);
+  if (!mine) return c.json({ error: 'no such practice' }, 404);
+  const sql = db();
+  if (b.calls_ok) await sql`update org_people set call_consent_at = coalesce(call_consent_at, now()), call_opt_out_at = null where id = ${mine.id}`;
+  else {
+    await sql`update org_people set call_opt_out_at = now() where id = ${mine.id}`;
+    await sql`update calls set status = 'skipped', skip_reason = 'patient opted out of calls', updated_at = now()
+              where patient_id = ${mine.id} and status in ('queued', 'no_answer')`;
+  }
+  await audit(mine.org_id, user.id, b.calls_ok ? 'portal.calls.opt_in' : 'portal.calls.opt_out', mine.id);
+  return c.json({ calls_ok: Boolean(b.calls_ok) });
 });
 
 api.post('/portal/refills', async (c) => {
@@ -767,6 +817,83 @@ api.post('/portal/appointments/:id/:action{confirm|cancel}', async (c) => {
   if (!a) return c.json({ error: 'no such upcoming appointment' }, 404);
   await audit(a.org_id, user.id, `portal.appointment.${status}`, a.id);
   return c.json({ appointment: a });
+});
+
+/* ------------------------------------------------------------------ calls -- */
+
+api.get('/orgs/:org/call-settings', async (c) => {
+  const { me } = await member(c, c.req.param('org'));
+  return c.json({ settings: await calls.settingsFor(me.org_id), calling_configured: calls.configured() });
+});
+
+api.put('/orgs/:org/call-settings', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'), ADMIN);
+  const b = await body(c);
+  const cur = await calls.settingsFor(me.org_id);
+  const int = (v, d) => (v === undefined || v === null || v === '' ? d : Math.round(Number(v)));
+  const next = {
+    enabled: b.enabled === undefined ? cur.enabled : Boolean(b.enabled),
+    reminder_hours_before: int(b.reminder_hours_before, cur.reminder_hours_before),
+    followup_hours_after: int(b.followup_hours_after, cur.followup_hours_after),
+    call_window_start: int(b.call_window_start, cur.call_window_start),
+    call_window_end: int(b.call_window_end, cur.call_window_end),
+    max_attempts: int(b.max_attempts, cur.max_attempts),
+  };
+  if (next.call_window_start >= next.call_window_end) fail(400, 'the calling window must start before it ends');
+  const [s] = await db()`
+    insert into org_call_settings ${db()({ org_id: me.org_id, ...next })}
+    on conflict (org_id) do update set enabled = excluded.enabled, reminder_hours_before = excluded.reminder_hours_before,
+      followup_hours_after = excluded.followup_hours_after, call_window_start = excluded.call_window_start,
+      call_window_end = excluded.call_window_end, max_attempts = excluded.max_attempts, updated_at = now()
+    returning *`;
+  // Re-time every queued call under the new settings.
+  const upcoming = await db()`select distinct appointment_id from calls where org_id = ${me.org_id} and status in ('queued', 'no_answer')`;
+  for (const r of upcoming) await calls.syncAppointmentCalls(r.appointment_id);
+  await audit(me.org_id, user.id, 'calls.settings');
+  return c.json({ settings: s });
+});
+
+api.get('/orgs/:org/calls/:id', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  const [row] = await db()`
+    select c.*, p.name as patient, a.starts_at from calls c
+    join org_people p on p.id = c.patient_id join appointments a on a.id = c.appointment_id
+    where c.id = ${uuid(c.req.param('id'))} and c.org_id = ${me.org_id}`;
+  if (!row) return c.json({ error: 'no such call' }, 404);
+  await audit(me.org_id, user.id, 'call.read', row.id);
+  return c.json({ call: row });
+});
+
+api.post('/orgs/:org/calls/:id/resolve', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  const [row] = await db()`update calls set resolved_at = now(), resolved_by = ${me.id}, updated_at = now()
+                           where id = ${uuid(c.req.param('id'))} and org_id = ${me.org_id} returning id`;
+  if (!row) return c.json({ error: 'no such call' }, 404);
+  await audit(me.org_id, user.id, 'call.resolve', row.id);
+  return c.json({ ok: true });
+});
+
+/** Call now: queue this appointment's reminder (or follow-up) as due immediately. */
+api.post('/orgs/:org/appointments/:id/call', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  await requireActive(me.org_id);
+  const kind = (await body(c)).kind === 'followup' ? 'followup' : 'reminder';
+  const [a] = await db()`select * from appointments where id = ${uuid(c.req.param('id'))} and org_id = ${me.org_id}`;
+  if (!a) return c.json({ error: 'no such appointment' }, 404);
+  const [row] = await db()`
+    insert into calls (org_id, appointment_id, patient_id, kind, due_at)
+    values (${me.org_id}, ${a.id}, ${a.patient_id}, ${kind}, now())
+    on conflict (appointment_id, kind) do update set
+      status = 'queued', due_at = now(), next_attempt_at = null, attempts = 0, skip_reason = null,
+      last_error = null, call_control_id = null, outcome = null, summary = null, transcript = null,
+      flagged = false, flag_reason = null, resolved_at = null, started_at = null, ended_at = null, updated_at = now()
+    where calls.status not in ('dialing', 'in_progress')
+    returning *`;
+  if (!row) return c.json({ error: 'a call for this appointment is already in progress' }, 409);
+  await audit(me.org_id, user.id, `call.now.${kind}`, row.id);
+  await calls.tick({ manualOrgId: me.org_id });
+  const [after] = await db()`select id, status, skip_reason, last_error from calls where id = ${row.id}`;
+  return c.json({ call: after });
 });
 
 /* --------------------------------------------------------------- billing -- */
