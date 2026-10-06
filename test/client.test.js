@@ -15,9 +15,10 @@ describe('cli', () => {
     expect(resolveDate('today')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(() => resolveDate('someday')).toThrow();
   });
-  test('formatDay marks demo data', () => {
-    const out = formatDay({ date: '2026-10-07', demo: true, appointments: [] });
-    expect(out).toContain('demo data');
+  test('formatDay names the practice and handles an empty day', () => {
+    const out = formatDay({ date: '2026-10-07', org: { name: 'Lin Family Practice' }, appointments: [] });
+    expect(out).toContain('Lin Family Practice');
+    expect(out).toContain('nothing booked');
   });
 });
 

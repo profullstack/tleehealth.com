@@ -12,16 +12,19 @@ up to 1,000 seats, whichever is lower. Patients and leads are free.
 
 | Path | What |
 | --- | --- |
-| `apps/web` | Bun + Hono: landing page, `/app` dashboard and `/patient` previews, PWA, `/api/v1` |
-| `design` | the design canvas artboards (`*.dc.html`); `python3 design/build.py` regenerates `apps/web/public/*.html` |
+| `apps/web` | Bun + Hono: landing page, the app (`/app` for the team, `/portal` for patients, `/signin`), PWA, `/api/v1`, CoinPay webhook |
+| `apps/web/public/app` | the browser app: plain ES module + CSS, no build step, talks only to `/api/v1` |
+| `packages/db` | Postgres client and migrations (run on every boot); `@profullstack/orgs` for orgs and members |
+| `packages/payments` | the shared CoinPay module, copied byte-for-byte from tipoffwatch (`d18b3088`) |
+| `design` | the design canvas artboards (`*.dc.html`); `python3 design/build.py` regenerates the landing page |
 | `packages/cli` | `@profullstack/tleehealth`: CLI, hqtui front-desk TUI (`tleehealth tui`), API client |
 | `packages/mcp` | `@profullstack/tleehealth-mcp`: MCP server over stdio |
 | `bin/install.sh` | `curl -fsSL https://tleehealth.com/install.sh \| sh` |
 
 ```sh
 bun install
-bun test
-bun run dev        # http://localhost:3000
+bun test           # DATABASE_URL=postgres://… runs the API tests too
+bun run dev        # http://localhost:3000 (without RESEND_API_KEY the sign-in link is printed to the log)
 ```
 
 ## Shipping
@@ -33,4 +36,4 @@ bun run dev        # http://localhost:3000
 - **Release:** bump `version` in both `packages/*/package.json` and merge. `release.yml`
   tags `vX.Y.Z`, creates the GitHub release and publishes both packages to npm.
 
-The schedule endpoint serves clearly marked demo data until accounts and orgs land.
+The API is listed at https://tleehealth.com/llms.txt.

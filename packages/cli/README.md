@@ -8,4 +8,4 @@ tleehealth schedule --date today
 tleehealth tui
 ```
 
-`TLEEHEALTH_API_KEY` and `TLEEHEALTH_URL` override the saved config. The schedule serves demo data until accounts launch.
+`TLEEHEALTH_API_KEY` and `TLEEHEALTH_URL` override the saved config. Create an API key in the app under Settings, then `tleehealth login th_live_...` or set `TLEEHEALTH_API_KEY`.

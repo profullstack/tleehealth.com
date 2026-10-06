@@ -15,12 +15,6 @@ PAGES = {
                      'Telehealth and practice management with an AI agent that calls every patient. '
                      'Scheduling, prescriptions, labs and health-record import. $10 per seat or $199 for up to 1,000.',
                      'https://tleehealth.com/'),
-    'Dashboard.dc.html': ('app.html', 'tleehealth: practice dashboard (preview)',
-                          'The tleehealth front-desk dashboard. Preview with demo data.',
-                          'https://tleehealth.com/app'),
-    'Patient.dc.html': ('patient.html', 'tleehealth: patient app (preview)',
-                        'The tleehealth patient app. Preview with demo data.',
-                        'https://tleehealth.com/patient'),
 }
 
 for src, (out, title, desc, canonical) in PAGES.items():
@@ -48,10 +42,11 @@ for src, (out, title, desc, canonical) in PAGES.items():
 </html>
 '''.replace('{{accent}}', ACCENT)
     if out == 'index.html':
-        # The landing page's placeholder links: the logo goes home, everything that
-        # starts or signs in goes to the app preview until accounts launch.
+        # The landing page's placeholder links: the logo goes home, Sign in goes to
+        # sign-in, and every Start button goes to the app (which signs you in first).
         page = page.replace('href="#"', 'href="/"', 1)
-        page = re.sub(r'href="#"(?=[^>]*>\s*(Sign in|Start))', 'href="/app"', page)
+        page = re.sub(r'href="#"(?=[^>]*>\s*Sign in)', 'href="/signin"', page)
+        page = re.sub(r'href="#"(?=[^>]*>\s*Start)', 'href="/app"', page)
     assert '{{' not in page, f'unfilled hole in {src}'
     (ROOT / 'apps/web/public' / out).write_text(page)
     print(f'{src} -> apps/web/public/{out} ({len(page)} bytes)')
