@@ -179,3 +179,6 @@ export const exportRecords = (auth, { format, connection } = {}) =>
   download(auth, `/api/v1/records/export${qs({ format: format === 'bundle' ? 'bundle' : undefined, connection })}`);
 
 export const recordFile = (auth, id) => download(auth, `/api/v1/records/files/${encodeURIComponent(id)}`);
+
+/** Who at which practice viewed, downloaded or exported the records you shared. */
+export const recordAccess = (auth) => call(auth, '/api/v1/records/access');

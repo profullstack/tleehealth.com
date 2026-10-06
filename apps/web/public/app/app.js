@@ -1357,6 +1357,7 @@ function portalHead(path) {
 const CONN_BADGE = { active: 'b-ok', syncing: 'b-info', error: 'b-alert', expired: 'b-warn', revoked: '' };
 const fmtSize = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 let recordsPoll = null;
+const ACCESS_LABEL = { 'records.read': 'viewed', 'records.file': 'opened a file', 'records.export': 'downloaded everything', 'records.share': 'shared', 'records.unshare': 'stopped sharing' };
 
 function profileCard(p, title = 'Personal information') {
   if (!p) return '';
@@ -1390,6 +1391,7 @@ async function renderRecords(q) {
   const category = q.get('category');
   const items = category ? (await get(`/records/items?category=${encodeURIComponent(category)}&limit=500`)).items : null;
   const syncing = data.connections.some((c) => c.status === 'syncing');
+  const { access } = data.practices.length ? await get('/records/access') : { access: [] };
   const ownFile = Object.assign((id) => `/api/v1/records/files/${id}?inline=1`, { own: true });
 
   const connections = data.connections.length
@@ -1429,6 +1431,10 @@ async function renderRecords(q) {
           <button type="submit">Connect</button><p class="err"></p></form></details>
       <p class="dim small">You sign in on your provider's own site and choose what to share; we never see your password. We copy your personal information, visits, after-visit summaries, notes, lab results, imaging, medications, conditions, allergies, immunizations, procedures and the files attached to them. Disconnecting deletes all of it here. <a href="/privacy">Privacy policy</a>.</p>
     </div></section>
+    ${access.length ? `<section class="card"><div class="card-h"><h2>Who has seen your shared records</h2></div><ul class="list">${access
+      .slice(0, 50)
+      .map((a) => `<li><span>${esc(a.org_name)}<div class="sub">${esc(a.you ? 'You' : (a.who ?? ''))}</div></span><span class="dim small">${esc(ACCESS_LABEL[a.action] ?? a.action)} · ${fmtDate(a.at)} ${fmtTime(a.at)}</span></li>`)
+      .join('')}</ul></section>` : ''}
     ${data.total ? `${profileCard(data.profile)}
     <section class="card"><div class="card-h"><h2>${category ? esc(data.categories.find((c) => c.key === category)?.label ?? category) : `${data.total} records · ${data.files} files`}</h2>${category ? '<a class="btn sm" href="/portal/records">All categories</a>' : ''}</div>
       ${category ? recordsList(items, ownFile) : `<ul class="list">${data.categories.map((c) => `<li><a href="/portal/records?category=${c.key}">${esc(c.label)}</a><span class="badge">${c.count}</span></li>`).join('')}</ul>`}

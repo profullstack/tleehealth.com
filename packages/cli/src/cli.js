@@ -13,6 +13,7 @@
  *   tleehealth disconnect CONNECTION_ID
  *   tleehealth export [--format zip|bundle] [--out FILE] [--connection ID]
  *   tleehealth file FILE_ID [--out FILE]
+ *   tleehealth access [--json]
  *   tleehealth health
  *   tleehealth login [KEY]
  *   tleehealth dashboard | tui
@@ -24,7 +25,7 @@ import { spawn } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import {
-  caseload, connect, connection, disconnect, exportRecords, health, logTime, providers, recordFile, recordItems, records,
+  caseload, connect, connection, disconnect, exportRecords, health, logTime, providers, recordAccess, recordFile, recordItems, records,
   resolveAuth, saveConfig, schedule, shareConnection, superbill, syncConnection,
 } from './client.js';
 
@@ -43,6 +44,7 @@ Your health records from other providers (MyChart and any SMART on FHIR portal):
   tleehealth share CONNECTION_ID --org ORG [--off]                  show a connection to a practice you are a patient of
   tleehealth export [--format zip|bundle] [--out FILE]              download everything: personal info, summaries, labs, notes, images
   tleehealth file FILE_ID [--out FILE]                              one attached file
+  tleehealth access                                                 who at which practice opened your shared records
   tleehealth disconnect CONNECTION_ID                               remove it and everything it imported
 
   tleehealth health                                                 is the API up
@@ -102,6 +104,8 @@ export function formatSuperbill(sb) {
   if (totals.length) lines.push(`ready to bill: ${totals.map(([c, n]) => `${c} x${n}`).join(', ')}`);
   return lines.join('\n');
 }
+
+const ACCESS_LABEL = { 'records.read': 'viewed', 'records.file': 'opened a file', 'records.export': 'downloaded everything', 'records.share': 'you shared', 'records.unshare': 'you stopped sharing' };
 
 const fmtBytes = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 
@@ -240,6 +244,13 @@ export async function main(argv = process.argv.slice(2)) {
         const r = await records(auth, { connection: flags.connection });
         console.log(flags.json ? JSON.stringify(r, null, 2) : formatRecords(r));
       }
+      return 0;
+    }
+    case 'access': {
+      const { access } = await recordAccess(auth);
+      if (flags.json) console.log(JSON.stringify(access, null, 2));
+      else if (!access.length) console.log('No practice has opened your shared records.');
+      else for (const a of access) console.log(`${String(a.at).slice(0, 16).replace('T', ' ')}  ${a.org_name.padEnd(28)} ${(a.you ? 'you' : a.who ?? '').padEnd(24)} ${ACCESS_LABEL[a.action] ?? a.action}`);
       return 0;
     }
     case 'providers': {

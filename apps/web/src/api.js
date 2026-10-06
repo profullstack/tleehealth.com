@@ -1169,6 +1169,22 @@ api.get('/records/export', async (c) => {
   });
 });
 
+// Who has looked at the records you shared: every practice read, file and export,
+// with the person and the practice, from the audit log.
+const ACCESS_ACTIONS = ['records.read', 'records.file', 'records.export', 'records.share', 'records.unshare'];
+api.get('/records/access', async (c) => {
+  const user = await requireUser(c);
+  const ids = (await myPatientRows(user)).map((p) => p.id);
+  const rows = ids.length
+    ? await db()`
+        select a.at, a.action, o.name as org_name, coalesce(u.name, u.email) as who, (a.user_id = ${user.id}) as you
+        from audit_log a join organizations o on o.id = a.org_id left join users u on u.id = a.user_id
+        where a.subject = any(${ids.map(String)}) and a.action = any(${ACCESS_ACTIONS})
+        order by a.at desc limit 500`
+    : [];
+  return c.json({ access: rows });
+});
+
 // The team's view: only connections this patient shared with this practice.
 api.get('/orgs/:org/patients/:id/records', async (c) => {
   const { me, user } = await member(c, c.req.param('org'));
