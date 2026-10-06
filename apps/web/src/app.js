@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { api, coinpayWebhook } from './api.js';
 import * as auth from './auth.js';
 import * as calls from './calls.js';
+import * as records from './records.js';
 import * as telnyx from './telnyx.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -59,6 +60,26 @@ app.get('/auth/magic', async (c) => {
   if (!s) return c.redirect('/signin?error=expired', 302);
   c.header('set-cookie', auth.sessionCookie(s.sessionId));
   return c.redirect('/app', 302);
+});
+
+// The provider (MyChart or any SMART on FHIR portal) sends the patient back here
+// after they sign in there and allow access. The import starts right away.
+app.get('/connect/callback', async (c) => {
+  const q = c.req.query();
+  const r = await records.finish(q).catch((err) => ({ error: err.message, return_to: 'portal' }));
+  if (!r.error && r.connection) records.syncInBackground(r.connection.id);
+  if (r.return_to === 'cli') {
+    const name = String(r.connection?.provider_name ?? 'your provider').replace(/[<>&"]/g, '');
+    const msg = r.error
+      ? `Could not connect: ${String(r.error).replace(/[<>&"]/g, '')}`
+      : `Connected to ${name}. Your records are importing now; you can close this tab and go back to the terminal.`;
+    return c.html(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>tleehealth</title>
+<body style="font:16px system-ui;background:#0b0f0d;color:#e6efe9;display:grid;place-items:center;min-height:90vh"><p style="max-width:32em">${msg}</p></body>`, r.error ? 400 : 200);
+  }
+  const to = new URL('/portal/records', 'http://x');
+  if (r.error) to.searchParams.set('error', String(r.error).slice(0, 200));
+  else to.searchParams.set('connected', r.connection.id);
+  return c.redirect(`${to.pathname}${to.search}`, 302);
 });
 
 app.post('/webhooks/coinpay', coinpayWebhook);
@@ -142,6 +163,15 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - POST /orgs/:org/refills/:id/approve|deny, /orgs/:org/labs/:id/release
 - PUT /orgs/:org/appointments/:id/summary, POST /orgs/:org/summaries/:id/sign
 - GET /portal                               a patient's own visits, meds, results and summaries
+- GET /records/providers?q=mychart name      providers to connect: every Epic/MyChart organization, plus any SMART on FHIR server by address
+- POST /records/connect                     {"provider_id"} or {"fhir_base"}: returns authorize_url; the patient signs in there and allows access
+- GET /records                              connections, personal information, counts per category
+- GET /records/items?category=&q=&connection=  imported records: visits, after-visit summaries, notes, labs, imaging, meds, conditions, allergies, immunizations, procedures
+- GET /records/files/:id                    an attached file (PDF summary, note, image)
+- POST /records/connections/:id/sync, DELETE /records/connections/:id (deletes everything imported)
+- PUT /records/connections/:id/share        {"org_id","shared"}: show a connection to a practice you are a patient of
+- GET /records/export?format=zip|bundle     download everything: readable files + raw FHIR, or one FHIR Bundle
+- GET /orgs/:org/patients/:id/records       what that patient shared with the practice (audit-logged)
 - GET|PUT /orgs/:org/call-settings          AI calls: on/off, hours before/after, calling window, attempts
 - POST /orgs/:org/appointments/:id/call     call the patient now ({"kind":"reminder"|"followup"})
 - GET /orgs/:org/calls/:id                  outcome, summary and transcript; POST .../resolve when handled

@@ -109,3 +109,73 @@ export async function logTime(auth, { org, program, minutes, activity, note, dat
     body: JSON.stringify({ minutes: Number(minutes), activity, note, performed_on: date }),
   });
 }
+
+/* ------------------------------------------------------------- dashboard -- */
+
+export const me = (auth) => call(auth, '/api/v1/me');
+
+/** The practice's day plus everything waiting on a human: flagged calls, refills, labs, summaries. */
+export async function dashboardDay(auth, { org, date } = {}) {
+  const id = await resolveOrg(auth, org);
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return call(auth, `/api/v1/orgs/${id}/today?date=${resolveDate(date)}&tz=${encodeURIComponent(tz)}`);
+}
+
+/* ---------------------------------------------------------- health records -- */
+// Your records imported from other providers (MyChart and any SMART on FHIR portal).
+
+const qs = (o) => {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(o)) if (v !== undefined && v !== null && v !== '' && v !== false) p.set(k, String(v));
+  const s = p.toString();
+  return s ? `?${s}` : '';
+};
+
+/** Connections, personal information and counts per category. */
+export const records = (auth, { connection } = {}) => call(auth, `/api/v1/records${qs({ connection })}`);
+
+export const recordItems = (auth, { category, q, connection, limit, offset } = {}) =>
+  call(auth, `/api/v1/records/items${qs({ category, q, connection, limit, offset })}`);
+
+export const recordItem = (auth, id) => call(auth, `/api/v1/records/items/${encodeURIComponent(id)}`);
+
+export const providers = (auth, q = '') => call(auth, `/api/v1/records/providers${qs({ q })}`);
+
+/** Start connecting a provider; open authorize_url in a browser to sign in there. */
+export const connect = (auth, { provider, fhirBase, name } = {}) =>
+  call(auth, '/api/v1/records/connect', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider_id: provider, fhir_base: fhirBase, name, return_to: 'cli' }),
+  });
+
+export const connection = (auth, id) => call(auth, `/api/v1/records/connections/${encodeURIComponent(id)}`);
+
+export const syncConnection = (auth, id, { wait = false } = {}) =>
+  call(auth, `/api/v1/records/connections/${encodeURIComponent(id)}/sync${wait ? '?wait=1' : ''}`, { method: 'POST' });
+
+export const disconnect = (auth, id) => call(auth, `/api/v1/records/connections/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+export const shareConnection = (auth, id, { org, shared = true }) =>
+  call(auth, `/api/v1/records/connections/${encodeURIComponent(id)}/share`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ org_id: org, shared }),
+  });
+
+/** Bytes and the server's filename, for downloads. */
+async function download(auth, path) {
+  const res = await fetch(`${auth.server}${path}`, { headers: auth.key ? { authorization: `Bearer ${auth.key}` } : {} });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? null;
+  return { filename: name, contentType: res.headers.get('content-type'), bytes: new Uint8Array(await res.arrayBuffer()) };
+}
+
+/** Everything: a zip of readable files + raw FHIR, or (format: 'bundle') one FHIR Bundle. */
+export const exportRecords = (auth, { format, connection } = {}) =>
+  download(auth, `/api/v1/records/export${qs({ format: format === 'bundle' ? 'bundle' : undefined, connection })}`);
+
+export const recordFile = (auth, id) => download(auth, `/api/v1/records/files/${encodeURIComponent(id)}`);
