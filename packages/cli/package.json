@@ -1,0 +1,16 @@
+{
+  "name": "@profullstack/tleehealth",
+  "version": "0.1.0",
+  "description": "tleehealth from the terminal: the CLI, the front-desk TUI, and the API client the MCP server uses.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Profullstack, Inc.",
+  "homepage": "https://tleehealth.com",
+  "repository": { "type": "git", "url": "https://github.com/profullstack/tleehealth.com", "directory": "packages/cli" },
+  "engines": { "node": ">=20" },
+  "bin": { "tleehealth": "./bin/tleehealth.mjs" },
+  "exports": { ".": "./src/cli.js", "./client": "./src/client.js" },
+  "files": ["bin", "src", "README.md"],
+  "dependencies": { "@profullstack/hqtui": "^0.8.0" },
+  "keywords": ["telehealth", "practice-management", "scheduling", "cli", "tui"]
+}

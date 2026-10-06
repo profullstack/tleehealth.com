@@ -1,0 +1,62 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "tleehealth.com",
+    },
+    "apps/web": {
+      "name": "@tleehealth/web",
+      "version": "0.1.0",
+      "dependencies": {
+        "@tleehealth/db": "workspace:*",
+        "hono": "^4.10.3",
+      },
+    },
+    "packages/cli": {
+      "name": "@profullstack/tleehealth",
+      "version": "0.1.0",
+      "bin": {
+        "tleehealth": "./bin/tleehealth.mjs",
+      },
+      "dependencies": {
+        "@profullstack/hqtui": "^0.8.0",
+      },
+    },
+    "packages/db": {
+      "name": "@tleehealth/db",
+      "version": "0.1.0",
+      "dependencies": {
+        "@profullstack/orgs": "^0.2.0",
+        "postgres": "^3.4.7",
+      },
+    },
+    "packages/mcp": {
+      "name": "@profullstack/tleehealth-mcp",
+      "version": "0.1.0",
+      "bin": {
+        "tleehealth-mcp": "./bin/tleehealth-mcp.mjs",
+      },
+      "dependencies": {
+        "@profullstack/tleehealth": "^0.1.0",
+      },
+    },
+  },
+  "packages": {
+    "@profullstack/hqtui": ["@profullstack/hqtui@0.8.0", "", { "bin": { "hqtui": "bin/hqtui.mjs" } }, "sha512-7dLq4Tb/GO7PyUaSRDf86K0AjeD55aBYW2Y7Mb2CM8YEAANno79ey0o9Dzr7QiGz/smJByah+gGp5UdAdDVGrA=="],
+
+    "@profullstack/orgs": ["@profullstack/orgs@0.2.0", "", { "peerDependencies": { "postgres": "^3.4.0" }, "bin": { "orgs": "src/cli.js" } }, "sha512-KYax/CBA4MGIqWennoroPjbsrCthY1iXwvad7YUHUwLwus9FyLDOriRnyLMWjMVCG/pihkDfKALUfdCYFGu+Ng=="],
+
+    "@profullstack/tleehealth": ["@profullstack/tleehealth@workspace:packages/cli"],
+
+    "@profullstack/tleehealth-mcp": ["@profullstack/tleehealth-mcp@workspace:packages/mcp"],
+
+    "@tleehealth/db": ["@tleehealth/db@workspace:packages/db"],
+
+    "@tleehealth/web": ["@tleehealth/web@workspace:apps/web"],
+
+    "hono": ["hono@4.13.13", "", {}, "sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA=="],
+
+    "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
+  }
+}

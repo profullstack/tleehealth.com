@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tleehealth: patient app (preview)</title>
+<meta name="description" content="The tleehealth patient app. Preview with demo data.">
+<link rel="canonical" href="https://tleehealth.com/patient">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0A0D0C">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0A0D0C}
+a{color:#ECEEE6}a:hover{color:#FFFFFF}
+</style>
+</head>
+<body>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #0A0D0C; color: #ECEEE6; font-family: 'Geist', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="flex: 1; overflow: hidden; padding: 28px 20px 16px; display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; justify-content: space-between; align-items: center">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <span style="font-size: 13px; color: #8A948E">Lin Family Practice</span>
+        <h1 style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.03em">Hi, Jin</h1>
+      </div>
+      <button type="button" aria-label="Notifications" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid #2C3531; background: #111614; color: #ECEEE6; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"></path></svg>
+        <span style="position: absolute; top: 9px; right: 10px; width: 8px; height: 8px; border-radius: 50%; background: #7CF2B0"></span>
+      </button>
+    </div>
+
+    <section aria-label="Next visit" style="border-radius: 20px; padding: 20px; background: #0F1A15; border: 1px solid #7CF2B0; display: flex; flex-direction: column; gap: 14px">
+      <div style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #7CF2B0">NEXT VISIT · VIDEO</div>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <div style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em">Thu, Oct 8 · 2:00 pm</div>
+        <div style="font-size: 14px; color: #A3ACA6">A. Shah, NP · diabetes follow-up</div>
+      </div>
+      <div style="display: flex; gap: 8px">
+        <a href="#" style="flex: 1; min-height: 46px; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: #7CF2B0; color: #0A0D0C; text-decoration: none; font-weight: 600; font-size: 15px">Join video</a>
+        <a href="#" style="flex: 1; min-height: 46px; display: flex; align-items: center; justify-content: center; border-radius: 12px; border: 1px solid #2C3531; color: #ECEEE6; text-decoration: none; font-size: 15px">Reschedule</a>
+      </div>
+      <div style="font-size: 12px; color: #8A948E">We'll call you Wednesday to confirm. You can also reschedule on that call.</div>
+    </section>
+
+    <section aria-label="A1C trend" style="border-radius: 18px; padding: 18px; background: #0C100F; border: 1px solid #1E2522; display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline">
+        <div style="font-size: 15px; font-weight: 600">A1C</div>
+        <div style="font-size: 12px; color: #8A948E">5 results · 3 sources</div>
+      </div>
+      <div style="display: flex; align-items: baseline; gap: 8px"><span style="font-size: 30px; font-weight: 600; letter-spacing: -0.03em">7.9%</span><span style="font-size: 13px; color: #FFB199">above 5.7% range</span></div>
+      <svg width="100%" height="56" viewBox="0 0 320 56" fill="none" aria-label="A1C rose from 6.8% to 7.9% over five results" role="img"><rect x="0" y="34" width="320" height="22" fill="#111614"></rect><path d="M8 40 L84 36 L160 30 L236 22 L312 12" stroke="#FFB199" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="312" cy="12" r="4" fill="#FFB199"></circle></svg>
+    </section>
+
+    <section aria-label="Latest summary" style="border-radius: 18px; padding: 18px; background: #0C100F; border: 1px solid #1E2522; display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 12px; color: #8A948E">After-visit summary · Sep 22</div>
+      <div style="font-size: 15px; line-height: 1.45">Metformin increased to 1000 mg twice daily. Recheck A1C in 3 months.</div>
+      <a href="#" style="font-size: 14px; color: #7CF2B0; text-decoration: none; min-height: 32px; display: inline-flex; align-items: center">Read full summary</a>
+    </section>
+
+    <section aria-label="Linked providers" style="display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; justify-content: space-between; align-items: center">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">Your records</h2>
+        <a href="#" style="font-size: 14px; color: #9CC7FF; text-decoration: none; min-height: 32px; display: inline-flex; align-items: center">+ Link a provider</a>
+      </div>
+      <div style="display: flex; gap: 8px; overflow: hidden">
+        <span style="padding: 9px 12px; border-radius: 10px; background: #101820; border: 1px solid #263039; font-size: 13px; white-space: nowrap">Hospital portal</span>
+        <span style="padding: 9px 12px; border-radius: 10px; background: #101820; border: 1px solid #263039; font-size: 13px; white-space: nowrap">Lab</span>
+        <span style="padding: 9px 12px; border-radius: 10px; background: #101820; border: 1px solid #263039; font-size: 13px; white-space: nowrap">Insurer</span>
+      </div>
+    </section>
+  </div>
+
+  <nav aria-label="App" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid #1E2522; background: #0C100F; padding: 6px 8px 22px">
+    <a href="#" style="min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; color: #7CF2B0; text-decoration: none"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9H3z"></path></svg>Home</a>
+    <a href="#" style="min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; color: #8A948E; text-decoration: none"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg>Visits</a>
+    <a href="#" style="min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; color: #8A948E; text-decoration: none"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V3M8 3h8"></path></svg>Results</a>
+    <a href="#" style="min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; color: #8A948E; text-decoration: none"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="7" rx="3.5" transform="rotate(-45 12 12.5)"></rect></svg>Meds</a>
+  </nav>
+</div>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});</script>
+</body>
+</html>
