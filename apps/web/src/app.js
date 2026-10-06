@@ -139,10 +139,14 @@ app.get('/icon.svg', (c) =>
 app.get('/favicon.ico', (c) => c.redirect('/icon.svg', 301));
 app.get('/install.sh', (c) => c.body(INSTALL_SH, 200, { 'content-type': 'text/x-shellscript' }));
 // Our public signing key for JWT client authentication (Epic fetches this).
-app.get('/.well-known/jwks.json', (c) => {
+// Epic wants distinct non-production and production URLs, so the sandbox
+// registration points at the second path; both serve the same public key.
+const jwksRoute = (c) => {
   const set = records.jwks();
   return set ? c.json(set, 200, { 'cache-control': 'public, max-age=3600' }) : c.json({ keys: [] }, 404);
-});
+};
+app.get('/.well-known/jwks.json', jwksRoute);
+app.get('/.well-known/jwks-sandbox.json', jwksRoute);
 app.get('/terms', (c) => c.html(pub('terms.html').toString()));
 app.get('/privacy', (c) => c.html(pub('privacy.html').toString()));
 app.get('/robots.txt', (c) => c.text('User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /portal\n'));
