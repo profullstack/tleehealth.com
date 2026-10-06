@@ -6,6 +6,7 @@ COPY apps/web/package.json apps/web/
 COPY packages/cli/package.json packages/cli/
 COPY packages/mcp/package.json packages/mcp/
 COPY packages/db/package.json packages/db/
+COPY packages/payments/package.json packages/payments/
 RUN bun install --production --frozen-lockfile || bun install --production
 COPY . .
 # dev2's umask 007 leaves copied files unreadable to the bun user otherwise.

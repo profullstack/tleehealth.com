@@ -19,7 +19,7 @@ export async function runTui(auth, date) {
     try {
       state.day = await schedule(auth, state.date);
       state.selected = 0;
-      state.status = `${state.day.appointments.length} appointments${state.day.demo ? ' · demo data' : ''}`;
+      state.status = `${state.day.appointments.length} appointments${state.day.org?.name ? ` · ${state.day.org.name}` : ''}`;
     } catch (err) {
       state.day = null;
       state.status = err.message;
@@ -54,7 +54,7 @@ export async function runTui(auth, date) {
             const i = rows.indexOf(a);
             const mark = i === state.selected ? '›' : ' ';
             panel.text(
-              `${mark} ${a.time}  ${a.provider.padEnd(11)} ${a.patient.padEnd(11)} ${a.type.padEnd(14)} ${a.mode.padEnd(9)} call: ${a.reminder_call}`,
+              `${mark} ${a.time}  ${a.provider.padEnd(11)} ${a.patient.padEnd(11)} ${a.type.padEnd(14)} ${a.mode.padEnd(9)} ${a.status}`,
               { fg: i === state.selected ? theme.accent : undefined },
             );
           }

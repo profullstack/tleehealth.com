@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "start": "bun src/main.js" },
-  "dependencies": { "@tleehealth/db": "workspace:*", "hono": "^4.10.3" }
+  "scripts": {
+    "start": "bun src/main.js"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "^13",
+    "@simplewebauthn/server": "^13.2.0",
+    "@tleehealth/db": "workspace:*",
+    "@tleehealth/payments": "workspace:*",
+    "hono": "^4.10.3"
+  }
 }

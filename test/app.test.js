@@ -12,12 +12,21 @@ describe('web', () => {
     expect(html).toContain('$199');
     expect(html).toContain('$10');
   });
-  test('dashboard and patient previews are served', async () => {
-    expect((await get('/app')).status).toBe(200);
-    expect((await get('/patient')).status).toBe(200);
+  test('the app shell is served for every app route', async () => {
+    for (const path of ['/app', '/app/patients', '/signin', '/portal']) {
+      const res = await get(path);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('/assets/app.js');
+    }
+    expect((await get('/patient')).status).toBe(301);
   });
-  test('built pages have no unfilled design holes', async () => {
-    for (const path of ['/', '/app', '/patient']) expect(await (await get(path)).text()).not.toContain('{{');
+  test('app assets are served', async () => {
+    expect((await get('/assets/app.js')).headers.get('content-type')).toContain('javascript');
+    expect((await get('/assets/app.css')).status).toBe(200);
+    expect((await get('/assets/webauthn.js')).status).toBe(200);
+  });
+  test('landing page has no unfilled design holes', async () => {
+    expect(await (await get('/')).text()).not.toContain('{{');
   });
   test('healthz', async () => expect((await get('/healthz')).status).toBe(200));
   test('api health reports the database', async () => {
@@ -27,12 +36,8 @@ describe('web', () => {
     expect(['ok', 'down', 'unconfigured']).toContain(body.database);
     expect(res.status).toBe(body.database === 'ok' ? 200 : 503);
   });
-  test('schedule is marked demo and validates the date', async () => {
-    const day = await (await get('/api/v1/schedule?date=2026-10-07')).json();
-    expect(day.demo).toBe(true);
-    expect(day.date).toBe('2026-10-07');
-    expect(day.appointments.length).toBeGreaterThan(0);
-    expect((await get('/api/v1/schedule?date=nope')).status).toBe(400);
+  test('schedule needs sign-in', async () => {
+    expect((await get('/api/v1/schedule?date=2026-10-07')).status).toBe(401);
   });
   test('unknown api path is JSON 404', async () => {
     const res = await get('/api/v1/nope');

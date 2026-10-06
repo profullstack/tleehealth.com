@@ -11,7 +11,7 @@ const TOOLS = [
   {
     name: 'get_schedule',
     description:
-      "The practice's appointments for one day across every location, with each patient's AI reminder-call state. Demo data until accounts launch.",
+      "The practice's appointments for one day across every location: time, patient, provider, location or video, reason and status. Needs TLEEHEALTH_API_KEY (create one in the app under Settings).",
     inputSchema: {
       type: 'object',
       properties: { date: { type: 'string', description: 'today (default), tomorrow or YYYY-MM-DD' } },

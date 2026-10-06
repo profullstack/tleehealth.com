@@ -37,10 +37,11 @@ export function parse(argv) {
 }
 
 export function formatDay(day) {
-  const lines = [`${day.date}${day.demo ? '  (demo data)' : ''}`];
+  const lines = [`${day.org?.name ? `${day.org.name}  ` : ''}${day.date}`];
+  if (!day.appointments.length) lines.push('  nothing booked');
   for (const a of day.appointments)
     lines.push(
-      `${a.time}  ${a.location.padEnd(11)} ${a.provider.padEnd(11)} ${a.patient.padEnd(11)} ${a.type.padEnd(14)} ${a.mode.padEnd(9)} ${a.reminder_call}`,
+      `${a.time}  ${a.location.padEnd(11)} ${a.provider.padEnd(11)} ${a.patient.padEnd(11)} ${a.type.padEnd(14)} ${a.mode.padEnd(9)} ${a.status}`,
     );
   return lines.join('\n');
 }
