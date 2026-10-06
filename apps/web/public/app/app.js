@@ -1422,6 +1422,7 @@ async function renderRecords(q) {
     ${q.get('error') ? `<section class="card"><div class="card-b"><span class="badge b-alert">not connected</span> ${esc(q.get('error'))}</div></section>` : ''}
     <section class="card"><div class="card-h"><h2>Connected providers</h2>${data.total ? `<span class="row" style="gap:6px"><a class="btn sm primary" href="/api/v1/records/export">Download everything</a><a class="btn sm" href="/api/v1/records/export?format=bundle" title="One HL7 FHIR file other health apps can import">FHIR</a></span>` : ''}</div>${connections}</section>
     <section class="card"><div class="card-h"><h2>Connect a provider</h2></div><div class="card-b stack">
+      <p class="dim small" style="margin:0">MyChart is rolling out: each health system turns tleehealth on as its Epic system picks it up. If your provider's sign-in page shows an "OAuth2 Error", it hasn't yet; try again in a day or two.</p>
       <input id="prov-q" placeholder="Search: your hospital or clinic (MyChart)" autocomplete="off" aria-label="Search providers">
       <ul class="list" id="prov-list" style="padding:0"></ul>
       <details><summary class="small">Not listed? Connect any patient portal by its FHIR address</summary>
