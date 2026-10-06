@@ -14,7 +14,10 @@ const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migr
  */
 export async function migrate({ log = console.log } = {}) {
   const sql = db();
-  await sql`select pg_advisory_lock(7351001)`;
+  // Lock and unlock on one reserved connection: through the pool the unlock could
+  // run on another connection, leaking the lock and hanging the next boot.
+  const lockConn = await sql.reserve();
+  await lockConn`select pg_advisory_lock(7351001)`;
   try {
     await migrateOrgs(sql);
     await sql`
@@ -38,6 +41,7 @@ export async function migrate({ log = console.log } = {}) {
     log(ran ? `[migrate] applied ${ran} migration(s)` : '[migrate] up to date');
     return ran;
   } finally {
-    await sql`select pg_advisory_unlock(7351001)`;
+    await lockConn`select pg_advisory_unlock(7351001)`;
+    lockConn.release();
   }
 }

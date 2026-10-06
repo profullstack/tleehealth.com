@@ -2,6 +2,8 @@ import { configured, db } from '@tleehealth/db';
 import { migrate } from '@tleehealth/db/migrate';
 import { configurePayments } from '@tleehealth/payments';
 import { app } from './app.js';
+import { startScheduler } from './calls.js';
+import { enabled as callingEnabled } from './telnyx.js';
 import { config } from './config.js';
 
 // Production never runs without its database; the deploy's health check then
@@ -14,10 +16,12 @@ if (configured()) {
   await migrate();
   // The coinpay object goes in whole: its getters read the environment on each access.
   configurePayments({ sql: db(), coinpay: config.coinpay, siteUrl: config.siteUrl });
+  // The AI-call dialler: every minute, inside each practice's calling hours.
+  if (process.env.CALLS_SCHEDULER !== 'off') startScheduler();
 }
 
 const port = Number(process.env.PORT || 3000);
 const server = Bun.serve({ port, fetch: app.fetch });
 console.log(
-  `[web] tleehealth listening on :${server.port} · site ${config.siteUrl} · mail ${config.mail.enabled ? 'on' : 'off'} · payments ${config.coinpay.enabled ? 'on' : 'off'}`,
+  `[web] tleehealth listening on :${server.port} · site ${config.siteUrl} · mail ${config.mail.enabled ? 'on' : 'off'} · payments ${config.coinpay.enabled ? 'on' : 'off'} · calls ${callingEnabled() ? 'on' : 'off'}`,
 );

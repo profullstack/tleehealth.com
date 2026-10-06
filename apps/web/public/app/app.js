@@ -21,6 +21,44 @@ const fmtDate = (d) => new Date(d).toLocaleDateString([], { weekday: 'short', mo
 const fmtDay = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
 const range = (lo, hi) => (lo != null && hi != null ? `${lo}–${hi}` : hi != null ? `≤ ${hi}` : lo != null ? `≥ ${lo}` : '');
 const dot = (...xs) => xs.filter(Boolean).join(' · ');
+const CALL_BADGE = { queued: '', dialing: 'b-info', in_progress: 'b-info', completed: 'b-ok', no_answer: 'b-warn', voicemail: 'b-warn', failed: 'b-alert', skipped: '', cancelled: '' };
+function callBadge(c) {
+  if (!c) return '';
+  const label =
+    c.status === 'queued' ? `${c.kind === 'reminder' ? 'reminder' : 'follow-up'} ${fmtShort(c.due_at)}`
+    : c.status === 'completed' ? (c.flagged ? 'needs follow-up' : 'done')
+    : nice(c.status);
+  const cls = c.status === 'completed' && c.flagged ? 'b-alert' : CALL_BADGE[c.status] ?? '';
+  const title = c.summary || c.skip_reason || '';
+  return `<span class="badge ${cls}" title="${esc(title)}">${esc(label)}</span>`;
+}
+const fmtShort = (d) => {
+  const x = new Date(d);
+  const sameDay = x.toDateString() === new Date().toDateString();
+  return sameDay ? fmtTime(x) : x.toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+async function showCall(id) {
+  const { call: c } = await get(`/orgs/${state.orgId}/calls/${id}`);
+  const lines = (c.transcript ?? [])
+    .filter((m) => m.content)
+    .map((m) => `<div style="margin:6px 0"><span class="mono small ${m.role === 'assistant' ? 'dim' : ''}">${m.role === 'assistant' ? 'Agent' : 'Patient'}</span><div>${esc(m.content)}</div></div>`)
+    .join('');
+  openModal(
+    `${c.kind === 'reminder' ? 'Reminder' : 'Follow-up'} call · ${esc(c.patient ?? '')}`,
+    `<div class="stack">
+      <dl class="kv"><dt>Status</dt><dd>${callBadge(c)}</dd><dt>When</dt><dd>${c.ended_at ? `${fmtDate(c.ended_at)} ${fmtTime(c.ended_at)}` : '—'}</dd>
+      <dt>Attempts</dt><dd>${c.attempts}</dd>${c.summary ? `<dt>Summary</dt><dd>${esc(c.summary)}</dd>` : ''}${c.flag_reason ? `<dt>For staff</dt><dd class="flag-high">${esc(c.flag_reason)}</dd>` : ''}${c.skip_reason ? `<dt>Skipped</dt><dd>${esc(c.skip_reason)}</dd>` : ''}${c.last_error ? `<dt>Last error</dt><dd class="dim">${esc(c.last_error)}</dd>` : ''}</dl>
+      ${lines ? `<div class="card"><div class="card-b" style="max-height:320px;overflow:auto">${lines}</div></div>` : '<p class="dim small">No transcript.</p>'}
+      ${c.flagged && !c.resolved_at ? `<button class="primary" id="resolve-call">Mark handled</button>` : c.resolved_at ? '<span class="badge b-ok">handled</span>' : ''}
+    </div>`,
+  );
+  document.getElementById('resolve-call')?.addEventListener('click', async () => {
+    await post(`/orgs/${state.orgId}/calls/${c.id}/resolve`);
+    modal.close();
+    toast('Marked handled');
+    render();
+  });
+}
 const money = (cents) => (cents == null ? 'custom' : `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`);
 const shiftDay = (iso, n) => {
   const d = new Date(`${iso}T12:00:00`);
@@ -306,11 +344,19 @@ async function viewToday(q) {
   const rows = appts
     .map(
       (a) => `<tr class="${a.id === nowId ? 'now' : ''}">
-      <td class="mono">${fmtTime(a.starts_at)}<div class="dim small">${a.minutes} min</div></td>
-      <td><a href="/app/patients/${a.patient_id}">${esc(a.patient ?? 'Unnamed')}</a><div class="dim small">${esc(a.reason ?? '')}</div></td>
+      <td class="mono" style="white-space:nowrap">${fmtTime(a.starts_at)}<div class="dim small">${a.minutes} min</div></td>
+      <td style="white-space:nowrap"><a href="/app/patients/${a.patient_id}">${esc(a.patient ?? 'Unnamed')}</a><div class="dim small">${esc(a.reason ?? '')}</div></td>
       <td class="muted">${esc(a.provider ?? '—')}</td>
       <td class="muted">${a.mode === 'video' ? 'Video' : esc(a.location ?? '—')}</td>
       <td><select class="inline" data-status="${a.id}" aria-label="Status">${STATUS.map((s) => `<option value="${s}" ${s === a.status ? 'selected' : ''}>${nice(s)}</option>`).join('')}</select></td>
+      <td>${(() => {
+        const r = a.calls?.find((x) => x.kind === 'reminder');
+        const f = a.calls?.find((x) => x.kind === 'followup');
+        // Before the visit the reminder matters; once it happened, the follow-up does.
+        const after = ['completed', 'no_show', 'checked_in'].includes(a.status);
+        const shown = after ? f ?? r : r && !['skipped', 'cancelled'].includes(r.status) ? r : f ?? r;
+        return `<span class="row" style="gap:6px;flex-wrap:nowrap">${shown ? (['queued', 'skipped', 'cancelled'].includes(shown.status) ? callBadge(shown) : `<button class="link small" data-call="${shown.id}">${callBadge(shown)}</button>`) : '<span class="dim small">none</span>'}<button class="sm" data-callnow="${a.id}" data-kind="${['completed', 'no_show'].includes(a.status) ? 'followup' : 'reminder'}" title="Call the patient now">Call</button></span>`;
+      })()}</td>
       <td>${clin ? `<button class="sm" data-summary="${a.id}">${a.summary_id ? (a.summary_status === 'signed' ? 'Summary ✓' : 'Summary draft') : 'Summary'}</button>` : a.summary_status ? `<span class="badge">${a.summary_status}</span>` : ''}</td>
     </tr>`,
     )
@@ -331,14 +377,20 @@ async function viewToday(q) {
   <div class="cols">
     <section class="card wide" aria-label="Schedule">
       <div class="card-h"><h2>Schedule</h2><span class="dim small mono">${esc(TZ)}</span></div>
-      ${appts.length ? `<div class="scroll"><table><thead><tr><th>Time</th><th>Patient</th><th>Provider</th><th>Where</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Nothing booked${loc ? ' at this location' : ''} on this day. <button class="link" id="new-appt-2">Book an appointment</button></div>`}
+      ${appts.length ? `<div class="scroll"><table><thead><tr><th>Time</th><th>Patient</th><th>Provider</th><th>Where</th><th>Status</th><th>Agent call</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Nothing booked${loc ? ' at this location' : ''} on this day. <button class="link" id="new-appt-2">Book an appointment</button></div>`}
     </section>
     <div class="narrow">
       <section class="card" aria-label="Needs a human">
-        <div class="card-h"><h2>Needs a human</h2><span class="dim small">${n.refills.length + n.labs.length + n.summaries.length}</span></div>
+        <div class="card-h"><h2>Needs a human</h2><span class="dim small">${n.calls.length + n.refills.length + n.labs.length + n.summaries.length}</span></div>
         ${
-          n.refills.length + n.labs.length + n.summaries.length
+          n.calls.length + n.refills.length + n.labs.length + n.summaries.length
             ? `<ul class="list">
+          ${n.calls
+            .map(
+              (c) => `<li><span><span class="${/URGENT/.test(c.flag_reason ?? '') ? 'flag-high' : ''}">${esc(c.flag_reason ?? c.summary)}</span><div class="sub"><a href="/app/patients/${c.patient_id}">${esc(c.patient)}</a> · ${c.kind === 'reminder' ? 'reminder' : 'follow-up'} call${c.phone ? ` · <span class="mono">${esc(c.phone)}</span>` : ''}</div></span>
+              <button class="sm" data-call="${c.id}">Transcript</button></li>`,
+            )
+            .join('')}
           ${n.refills
             .map(
               (r) => `<li><span><span>Refill: ${esc(r.medication)} ${esc(r.dose ?? '')}</span><div class="sub"><a href="/app/patients/${r.patient_id}">${esc(r.patient)}</a></div></span>
@@ -358,7 +410,7 @@ async function viewToday(q) {
             )
             .join('')}
         </ul>`
-            : '<div class="empty">All clear: no refills, results or summaries waiting.</div>'
+            : '<div class="empty">All clear: no calls, refills, results or summaries waiting.</div>'
         }
       </section>
     </div>
@@ -391,6 +443,22 @@ function bindClinicalButtons(appts = []) {
   main.querySelectorAll('[data-summary]').forEach((b) => {
     b.onclick = () => summaryModal(b.dataset.summary, appts);
   });
+  main.querySelectorAll('[data-call]').forEach((b) => {
+    b.onclick = () => showCall(b.dataset.call).catch((err) => toast(err.message, true));
+  });
+  main.querySelectorAll('[data-callnow]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const { call } = await post(`/orgs/${state.orgId}/appointments/${b.dataset.callnow}/call`, { kind: b.dataset.kind });
+        toast(call.status === 'dialing' ? 'Calling now' : call.status === 'skipped' ? `Not called: ${call.skip_reason}` : call.status === 'no_answer' ? 'Outside calling hours; queued for the next window' : `Queued (${nice(call.status)})`, call.status === 'skipped');
+        await render();
+      } catch (err) {
+        toast(err.message, true);
+        b.disabled = false;
+      }
+    };
+  });
 }
 
 /* ------------------------------------------------------------ appointment -- */
@@ -419,6 +487,7 @@ async function appointmentModal({ date = todayISO(), patientId } = {}) {
         <label class="f">Location<select name="location_id"><option value="">None</option>${state.org.locations.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join('')}</select></label>
       </div>
       <label class="f">Reason<input name="reason" placeholder="Follow-up"></label>
+      <label class="row small muted" style="gap:8px"><input type="checkbox" name="call_consent" value="yes" checked style="width:18px;min-height:18px"> Patient agreed to automated reminder and follow-up calls from our AI assistant</label>
       <p class="err"></p>
       <button class="primary" type="submit">Book</button>
     </form>`,
@@ -426,7 +495,7 @@ async function appointmentModal({ date = todayISO(), patientId } = {}) {
       const when = new Date(`${d.date}T${d.time}`);
       if (Number.isNaN(when.getTime()) || when.getFullYear() > 2200) throw new Error('Pick a valid date and time');
       const starts_at = when.toISOString();
-      await post(`/orgs/${state.orgId}/appointments`, { ...d, starts_at, minutes: Number(d.minutes) });
+      await post(`/orgs/${state.orgId}/appointments`, { ...d, starts_at, minutes: Number(d.minutes), call_consent: d.call_consent === 'yes' });
       toast('Booked');
     },
   );
@@ -525,12 +594,13 @@ function personModal(type) {
       <div class="grid2"><label class="f">Phone<input name="phone" type="tel"></label>
       ${type === 'patient' ? '<label class="f">Date of birth<input name="dob" type="date"></label>' : ''}
       ${type === 'lead' ? '<label class="f">Source<input name="source" placeholder="Newsletter, call, referral"></label>' : ''}</div>
+      ${team ? '' : '<label class="row small muted" style="gap:8px"><input type="checkbox" name="call_consent" value="yes" style="width:18px;min-height:18px"> Agreed to automated calls from our AI assistant</label>'}
       ${team ? '<p class="dim small">Each team member is a $10/month seat (the practice pays $199/month at most). They get an email and sign in with it.</p>' : type === 'patient' ? '<p class="dim small">With an email, they get a note and can sign in to see their visits, results and prescriptions.</p>' : ''}
       <p class="err"></p>
       <button class="primary" type="submit">${team ? 'Send invite' : 'Add'}</button>
     </form>`,
     async (d) => {
-      await post(`/orgs/${state.orgId}/people`, d);
+      await post(`/orgs/${state.orgId}/people`, { ...d, call_consent: d.call_consent === 'yes' });
       toast(team ? 'Invited' : 'Added');
     },
   );
@@ -614,8 +684,21 @@ async function viewChart(id) {
               .join('')}</ul></section>`
           : ''
       }
+      <section class="card"><div class="card-h"><h2>Agent calls</h2></div>
+        ${
+          c.calls.length
+            ? `<ul class="list">${c.calls
+                .map(
+                  (x) => `<li><span><span>${x.kind === 'reminder' ? 'Reminder' : 'Follow-up'} ${callBadge(x)}</span><div class="sub">${esc(x.summary ?? x.skip_reason ?? (x.status === 'queued' ? `due ${fmtDate(x.due_at)} ${fmtTime(x.due_at)}` : ''))}</div></span>
+                  ${x.has_transcript || x.summary ? `<button class="sm" data-call="${x.id}">View</button>` : ''}</li>`,
+                )
+                .join('')}</ul>`
+            : '<div class="empty">No calls yet. Each appointment gets a reminder before and a follow-up after.</div>'
+        }
+      </section>
       <section class="card"><div class="card-h"><h2>Details</h2></div><div class="card-b"><dl class="kv">
         <dt>Type</dt><dd>${TYPE_LABEL[p.user_type]}</dd>
+        <dt>AI calls</dt><dd>${p.call_opt_out_at ? 'Opted out' : p.call_consent_at ? `Consented ${fmtDate(p.call_consent_at)}` : 'No consent on file'} <button class="link small" id="toggle-consent">${p.call_consent_at && !p.call_opt_out_at ? 'Turn off' : 'Record consent'}</button></dd>
         <dt>Portal</dt><dd>${p.user_id ? 'Signed in' : p.email ? 'Invited by email' : 'No email on file'}</dd>
         <dt>Added</dt><dd>${fmtDate(p.created_at)}</dd>
         ${p.notes ? `<dt>Notes</dt><dd>${esc(p.notes)}</dd>` : ''}
@@ -626,6 +709,11 @@ async function viewChart(id) {
     html,
     bind() {
       document.getElementById('book').onclick = () => appointmentModal({ patientId: id });
+      document.getElementById('toggle-consent').onclick = () => {
+        const on = !(p.call_consent_at && !p.call_opt_out_at);
+        if (on && !confirm('Record that this patient agreed to automated reminder and follow-up calls?')) return;
+        act(() => api('PATCH', `/orgs/${state.orgId}/people/${id}`, { call_consent: on }), on ? 'Consent recorded' : 'Calls turned off');
+      };
       bindClinicalButtons(c.appointments);
       document.getElementById('add-med')?.addEventListener('click', () =>
         openModal(
@@ -782,7 +870,8 @@ async function viewBilling(q) {
 /* -------------------------------------------------------------- settings -- */
 
 async function viewSettings() {
-  const { keys } = await get('/keys');
+  const [{ keys }, cs] = await Promise.all([get('/keys'), get(`/orgs/${state.orgId}/call-settings`)]);
+  const s = cs.settings;
   const html = `
   <div class="head"><h1>Settings</h1><button id="signout">Sign out</button></div>
   <div class="cols">
@@ -792,7 +881,20 @@ async function viewSettings() {
         <p class="dim small">${esc(state.me.user.email)}</p></div></section>
       <section class="card"><div class="card-h"><h2>Passkeys</h2><button class="sm" id="add-passkey">Add a passkey</button></div>
         <div class="card-b muted">${state.me.passkeys ? `${state.me.passkeys} passkey${state.me.passkeys === 1 ? '' : 's'} saved. Sign in with Face ID, Touch ID or your security key.` : 'Add one to sign in without waiting for an email.'}</div></section>
-      ${is(ADMIN) ? `<section class="card"><div class="card-h"><h2>Practice</h2></div><div class="card-b"><form id="org-form" class="row"><label class="f" style="flex:1">Practice name<input name="name" value="${esc(state.org.org.name)}"></label><button type="submit" style="align-self:flex-end">Rename</button></form></div></section>` : ''}
+      ${is(ADMIN) ? `<section class="card"><div class="card-h"><h2>AI calls</h2>${cs.calling_configured ? '' : '<span class="badge b-warn">not connected yet</span>'}</div><div class="card-b">
+        <form id="calls-form" class="stack">
+          <label class="row" style="gap:8px"><input type="checkbox" name="enabled" value="yes" ${s.enabled ? 'checked' : ''} style="width:18px;min-height:18px"> Call every patient before and after each visit</label>
+          <div class="grid2">
+            <label class="f">Reminder, hours before<input name="reminder_hours_before" type="number" min="1" max="168" value="${s.reminder_hours_before}"></label>
+            <label class="f">Follow-up, hours after<input name="followup_hours_after" type="number" min="1" max="168" value="${s.followup_hours_after}"></label>
+            <label class="f">Call from (local hour)<input name="call_window_start" type="number" min="0" max="23" value="${s.call_window_start}"></label>
+            <label class="f">Call until (local hour)<input name="call_window_end" type="number" min="1" max="24" value="${s.call_window_end}"></label>
+            <label class="f">Attempts per call<input name="max_attempts" type="number" min="1" max="5" value="${s.max_attempts}"></label>
+          </div>
+          <p class="dim small">Only patients who agreed to automated calls are called, and the assistant always says it is automated. It confirms, cancels or takes reschedule requests, and passes anything clinical to your team under Needs a human.</p>
+          <div><button type="submit">Save call settings</button></div>
+        </form></div></section>
+      <section class="card"><div class="card-h"><h2>Practice</h2></div><div class="card-b"><form id="org-form" class="row"><label class="f" style="flex:1">Practice name<input name="name" value="${esc(state.org.org.name)}"></label><button type="submit" style="align-self:flex-end">Rename</button></form></div></section>` : ''}
     </div>
     <section class="card narrow"><div class="card-h"><h2>API keys</h2><button class="sm" id="new-key">New key</button></div>
       <div class="card-b dim small">For the CLI, TUI and MCP server: <span class="mono">tleehealth login</span> or <span class="mono">TLEEHEALTH_API_KEY</span>.</div>
@@ -807,6 +909,11 @@ async function viewSettings() {
         e.preventDefault();
         act(() => api('PATCH', '/me', formData(e.target)), 'Saved');
       };
+      document.getElementById('calls-form')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const d = formData(e.target);
+        act(() => api('PUT', `/orgs/${state.orgId}/call-settings`, { ...d, enabled: d.enabled === 'yes' }), 'Call settings saved');
+      });
       document.getElementById('org-form')?.addEventListener('submit', (e) => {
         e.preventDefault();
         act(() => api('PATCH', `/orgs/${state.orgId}`, formData(e.target)), 'Renamed');
@@ -879,6 +986,8 @@ async function renderPortal() {
               .join('')}</ul>`
           : '<div class="empty">No medications on file.</div>'
       }</section>
+      <section class="card"><div class="card-b row" style="justify-content:space-between"><span><b>Reminder calls</b><div class="dim small">${pr.calls_ok ? 'Our automated assistant calls before and after each visit.' : 'You will not get automated calls.'}</div></span>
+        <button class="sm" data-calls="${pr.org.id}" data-on="${pr.calls_ok ? '' : 'yes'}">${pr.calls_ok ? 'Turn off' : 'Turn on'}</button></div></section>
       ${pr.summaries.length ? `<section class="card"><div class="card-h"><h2>Visit summaries</h2></div><div class="card-b stack">${pr.summaries.map((s) => `<div><div class="dim small">${esc(dot(fmtDate(s.signed_at), s.provider))}</div>${s.diagnosis ? `<div><b>${esc(s.diagnosis)}</b></div>` : ''}${s.instructions ? `<div class="muted" style="white-space:pre-line">${esc(s.instructions)}</div>` : ''}${s.med_changes ? `<div class="small">Medication changes: ${esc(s.med_changes)}</div>` : ''}${s.follow_up_on ? `<div class="small">Follow up: ${esc(String(s.follow_up_on).slice(0, 10))}</div>` : ''}</div>`).join('<hr style="border:0;border-top:1px solid var(--line);width:100%">')}</div></section>` : ''}`;
         })
         .join('')
@@ -893,6 +1002,9 @@ async function renderPortal() {
       (b.onclick = () =>
         (b.dataset.x !== 'cancel' || confirm('Cancel this visit?')) &&
         act(() => post(`/portal/appointments/${b.dataset.pa}/${b.dataset.x}`), b.dataset.x === 'confirm' ? 'Confirmed' : 'Cancelled')),
+  );
+  root.querySelectorAll('[data-calls]').forEach(
+    (b) => (b.onclick = () => act(() => post('/portal/calls', { org_id: b.dataset.calls, calls_ok: b.dataset.on === 'yes' }), b.dataset.on === 'yes' ? 'Reminder calls on' : 'Reminder calls off')),
   );
   root.querySelectorAll('[data-refill-me]').forEach((b) => (b.onclick = () => act(() => post('/portal/refills', { medication_id: b.dataset.refillMe }), 'Refill requested')));
 }

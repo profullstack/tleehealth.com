@@ -5,6 +5,8 @@ import { ping } from '@tleehealth/db';
 import { Hono } from 'hono';
 import { api, coinpayWebhook } from './api.js';
 import * as auth from './auth.js';
+import * as calls from './calls.js';
+import * as telnyx from './telnyx.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pub = (name) => readFileSync(join(here, '..', 'public', name));
@@ -61,6 +63,32 @@ app.get('/auth/magic', async (c) => {
 
 app.post('/webhooks/coinpay', coinpayWebhook);
 
+// Telnyx call events for the AI calls. Signed with ed25519 over the raw body.
+app.post('/webhooks/telnyx', async (c) => {
+  const raw = await c.req.text();
+  const ok = telnyx.verifyWebhook({
+    rawBody: raw,
+    signature: c.req.header('telnyx-signature-ed25519'),
+    timestamp: c.req.header('telnyx-timestamp'),
+  });
+  if (!ok) return c.json({ error: 'bad signature' }, 401);
+  let event;
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return c.json({ error: 'bad json' }, 400);
+  }
+  // Always 200 once verified: a thrown error here would make Telnyx retry an
+  // event we already half-applied. Failures are logged and visible on the call row.
+  const result = await calls.handleTelnyxEvent(event).catch((err) => {
+    console.error('[telnyx]', event?.data?.event_type, err.message);
+    return { error: err.message };
+  });
+  // Event type and what we did with it; no patient details.
+  console.log(`[telnyx] ${event?.data?.event_type} -> ${Object.entries(result ?? {}).map(([k, v]) => `${k}:${typeof v === 'string' ? v.slice(0, 40) : v}`).join(' ')}`);
+  return c.json({ ok: true, result });
+});
+
 /* --------------------------------------------------------------------- API -- */
 
 app.get('/api/v1', (c) => c.json({ name: 'tleehealth', version: VERSION, docs: 'https://tleehealth.com/llms.txt' }));
@@ -112,6 +140,9 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - POST /orgs/:org/refills/:id/approve|deny, /orgs/:org/labs/:id/release
 - PUT /orgs/:org/appointments/:id/summary, POST /orgs/:org/summaries/:id/sign
 - GET /portal                               a patient's own visits, meds, results and summaries
+- GET|PUT /orgs/:org/call-settings          AI calls: on/off, hours before/after, calling window, attempts
+- POST /orgs/:org/appointments/:id/call     call the patient now ({"kind":"reminder"|"followup"})
+- GET /orgs/:org/calls/:id                  outcome, summary and transcript; POST .../resolve when handled
 
 ## Tools
 - CLI + TUI: npm i -g @profullstack/tleehealth  (or: curl -fsSL https://tleehealth.com/install.sh | sh)
