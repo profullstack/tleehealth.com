@@ -18,7 +18,7 @@
     },
     "packages/cli": {
       "name": "@profullstack/tleehealth",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "bin": {
         "tleehealth": "./bin/tleehealth.mjs",
       },
@@ -36,12 +36,12 @@
     },
     "packages/mcp": {
       "name": "@profullstack/tleehealth-mcp",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "bin": {
         "tleehealth-mcp": "./bin/tleehealth-mcp.mjs",
       },
       "dependencies": {
-        "@profullstack/tleehealth": "^0.2.0",
+        "@profullstack/tleehealth": "^0.3.0",
       },
     },
     "packages/payments": {

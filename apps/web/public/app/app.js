@@ -3,10 +3,11 @@
 const root = document.getElementById('root');
 const modal = document.getElementById('modal');
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
-const TEAM = ['owner', 'org_manager', 'provider', 'staff'];
+const TEAM = ['owner', 'org_manager', 'provider', 'staff', 'advocate'];
 const ADMIN = ['owner', 'org_manager'];
 const CLINICIAN = ['owner', 'provider'];
-const TYPE_LABEL = { owner: 'Owner', org_manager: 'Org manager', provider: 'Provider', staff: 'Staff', patient: 'Patient', lead: 'Lead' };
+const BILLERS = ['owner', 'org_manager', 'provider'];
+const TYPE_LABEL = { owner: 'Owner', org_manager: 'Org manager', provider: 'Provider', staff: 'Staff', advocate: 'Advocate', patient: 'Patient', lead: 'Lead' };
 const STATUS = ['scheduled', 'confirmed', 'checked_in', 'completed', 'cancelled', 'no_show'];
 const STATUS_BADGE = { scheduled: '', confirmed: 'b-ok', checked_in: 'b-info', completed: 'b-ok', cancelled: '', no_show: 'b-alert' };
 
@@ -197,6 +198,8 @@ async function render() {
     else if (path === '/app/patients') view = await viewPeople('patient', q);
     else if (path === '/app/leads') view = await viewPeople('lead', q);
     else if (path === '/app/team') view = await viewTeam();
+    else if (path === '/app/caseload') view = await viewCaseload(q);
+    else if (path === '/app/superbill' && is(BILLERS)) view = await viewSuperbill(q);
     else if (path === '/app/locations') view = viewLocations();
     else if (path === '/app/billing') view = await viewBilling(q);
     else if (path === '/app/settings') view = await viewSettings();
@@ -229,6 +232,8 @@ function shell(path, main) {
       ${navItem('/app', 'Today')}
       ${navItem('/app/patients', 'Patients')}
       ${navItem('/app/leads', 'Leads')}
+      ${navItem('/app/caseload', 'Caseload')}
+      ${is(BILLERS) ? navItem('/app/superbill', 'Superbill') : ''}
       ${navItem('/app/team', 'Team')}
       ${navItem('/app/locations', 'Locations')}
       ${is(ADMIN) ? navItem('/app/billing', 'Billing', o.billing.active ? '' : '<span class="count">unpaid</span>') : ''}
@@ -588,7 +593,7 @@ function personModal(type) {
   openModal(
     team ? 'Invite to the team' : type === 'lead' ? 'Add lead' : 'Add patient',
     `<form class="stack">
-      ${team ? `<label class="f">Role<select name="user_type"><option value="provider">Provider</option><option value="staff">Staff</option><option value="org_manager">Org manager</option></select></label>` : `<input type="hidden" name="user_type" value="${type}">`}
+      ${team ? `<label class="f">Role<select name="user_type"><option value="provider">Provider</option><option value="staff">Staff</option><option value="advocate">Advocate (navigator)</option><option value="org_manager">Org manager</option></select></label>` : `<input type="hidden" name="user_type" value="${type}">`}
       <label class="f">Name<input name="name" ${team ? '' : 'required'}></label>
       <label class="f">Email<input name="email" type="email" ${team ? 'required' : ''}></label>
       <div class="grid2"><label class="f">Phone<input name="phone" type="tel"></label>
@@ -635,6 +640,7 @@ async function viewChart(id) {
             : '<div class="empty">No appointments yet.</div>'
         }
       </section>
+      ${p.user_type === 'patient' ? carePlanCard(c.care_plan) : ''}
       <section class="card"><div class="card-h"><h2>Results</h2><button class="sm" id="add-lab">Add result</button></div>
         ${
           c.labs.length
@@ -663,6 +669,7 @@ async function viewChart(id) {
       </section>
     </div>
     <div class="narrow">
+      ${p.user_type === 'patient' ? programsCard(c.programs, id) : ''}
       <section class="card"><div class="card-h"><h2>Medications</h2>${clin ? '<button class="sm" id="add-med">Prescribe</button>' : ''}</div>
         ${
           c.medications.length
@@ -715,6 +722,11 @@ async function viewChart(id) {
         act(() => api('PATCH', `/orgs/${state.orgId}/people/${id}`, { call_consent: on }), on ? 'Consent recorded' : 'Calls turned off');
       };
       bindClinicalButtons(c.appointments);
+      if (p.user_type === 'patient') {
+        bindCarePlan(id, c.care_plan);
+        bindProgramButtons(c.programs);
+        document.getElementById('enroll').onclick = () => enrollModal(id).catch((err) => toast(err.message, true));
+      }
       document.getElementById('add-med')?.addEventListener('click', () =>
         openModal(
           'Prescribe',
@@ -754,6 +766,303 @@ async function viewChart(id) {
   };
 }
 
+/* ------------------------------------------------------------ navigation -- */
+// Care plans, care-management programs (PIN, CHI, CCM) and the minutes logged
+// toward their billing codes. Shared by the chart and the caseload.
+
+const PROGRAM_NAME = { pin: 'PIN', pin_ps: 'PIN peer support', chi: 'CHI', ccm: 'CCM' };
+const ACTIVITY_LABEL = {
+  assessment: 'Assessment',
+  care_plan: 'Care planning',
+  coordination: 'Care coordination',
+  referral: 'Referral',
+  prior_auth: 'Prior authorization',
+  scheduling: 'Scheduling',
+  education: 'Education',
+  community_resources: 'Community resources',
+  call: 'Phone call',
+  other: 'Other',
+};
+const thisMonthISO = () => todayISO().slice(0, 7);
+const shiftMonth = (m, n) => {
+  const d = new Date(`${m}-15T12:00:00`);
+  d.setMonth(d.getMonth() + n);
+  return d.toLocaleDateString('en-CA').slice(0, 7);
+};
+const fmtMonth = (m) => new Date(`${m}-15T12:00:00`).toLocaleDateString([], { month: 'long', year: 'numeric' });
+const codesText = (r) => r.lines.map((l) => `${l.code}${l.units > 1 ? ` ×${l.units}` : ''}`).join(' + ');
+
+/** Minutes toward the next unit, as a bar and a line of text. */
+function progress(r) {
+  const target = r.next_unit_in == null ? r.minutes : r.minutes + r.next_unit_in;
+  const pct = target ? Math.min(100, Math.round((r.minutes / target) * 100)) : 0;
+  const text = r.next_unit_in == null ? 'every unit earned this month' : `${r.next_unit_in} min to ${r.lines.length ? 'the next add-on' : 'the first code'}`;
+  return `<div class="meter ${r.blockers.length ? 'held' : ''}" role="img" aria-label="${r.minutes} minutes, ${esc(text)}"><i style="width:${pct}%"></i></div>
+    <div class="dim small">${r.minutes} min${r.lines.length ? ` · <b class="mono">${esc(codesText(r))}</b>` : ''} · ${esc(text)}</div>`;
+}
+const blockerBadge = (r) =>
+  r.blockers.length ? `<span class="badge b-warn" title="${esc(r.blockers.join('\n'))}">${r.blockers.length === 1 ? esc(r.blockers[0]) : `${r.blockers.length} things missing`}</span>` : r.lines.length ? '<span class="badge b-ok">ready to bill</span>' : '';
+
+function logTimeModal(programId, label = '') {
+  openModal(
+    `Log time${label ? ` · ${label}` : ''}`,
+    `<form class="stack">
+      <div class="grid2">
+        <label class="f">Minutes<input name="minutes" type="number" min="1" max="240" required value="15"></label>
+        <label class="f">Date<input name="performed_on" type="date" value="${todayISO()}" max="${todayISO()}"></label>
+      </div>
+      <label class="f">Activity<select name="activity">${Object.entries(ACTIVITY_LABEL).map(([k, v]) => `<option value="${k}" ${k === 'coordination' ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="f">What you did<textarea name="note" placeholder="Called the oncology office to move the port placement; prior auth sent to Aetna"></textarea></label>
+      <p class="dim small">Count only your own time on this patient's navigation, and only once: the same minutes cannot go toward two programs.</p>
+      <p class="err"></p><button class="primary" type="submit">Log time</button></form>`,
+    async (d) => {
+      const { program: r } = await post(`/orgs/${state.orgId}/programs/${programId}/time`, { ...d, minutes: Number(d.minutes) });
+      toast(r?.lines.length ? `${r.minutes} min this month: ${codesText(r)}` : `${r?.minutes ?? d.minutes} min logged`);
+    },
+  );
+}
+
+async function timeModal(programId, label) {
+  const month = thisMonthISO();
+  const { time } = await get(`/orgs/${state.orgId}/programs/${programId}/time?month=${month}`);
+  openModal(
+    `${label} · ${fmtMonth(month)}`,
+    time.length
+      ? `<ul class="list">${time
+          .map(
+            (t) => `<li><span><span>${t.minutes} min · ${esc(ACTIVITY_LABEL[t.activity] ?? t.activity)}</span><div class="sub">${esc(dot(String(t.performed_on).slice(0, 10), t.by, t.note))}</div></span>
+            <button class="sm danger" data-deltime="${t.id}">Delete</button></li>`,
+          )
+          .join('')}</ul>`
+      : '<div class="empty">No time logged this month.</div>',
+  );
+  modal.querySelectorAll('[data-deltime]').forEach(
+    (b) =>
+      (b.onclick = async () => {
+        if (!confirm('Delete this time entry?')) return;
+        try {
+          await api('DELETE', `/orgs/${state.orgId}/time/${b.dataset.deltime}`);
+          b.closest('li').remove();
+          toast('Deleted');
+          modal.addEventListener('close', () => render(), { once: true });
+        } catch (err) {
+          toast(err.message, true);
+        }
+      }),
+  );
+}
+
+async function enrollModal(patientId) {
+  const [{ programs }, { people: clinicians }, { people: team }] = await Promise.all([
+    get('/navigation/programs'),
+    get(`/orgs/${state.orgId}/people?type=provider,owner`),
+    get(`/orgs/${state.orgId}/people?type=team`),
+  ]);
+  openModal(
+    'Enroll in a program',
+    `<form class="stack">
+      <label class="f">Program<select name="program" id="prog-pick">${Object.entries(programs)
+        .map(([k, p]) => `<option value="${k}">${esc(p.name)} (${p.first.code}/${p.addon.code})</option>`)
+        .join('')}</select></label>
+      <p class="dim small" id="prog-about">${esc(Object.values(programs)[0].about)}</p>
+      <label class="f">Condition<input name="condition" required placeholder="Stage III colon cancer"></label>
+      <div class="grid2">
+        <label class="f">Billing practitioner<select name="billing_provider_id" required>${clinicians.map((p) => `<option value="${p.id}">${esc(p.name ?? p.email)}${p.npi ? '' : ' (no NPI yet)'}</option>`).join('')}</select></label>
+        <label class="f">Navigator<select name="navigator_id">${team.map((p) => `<option value="${p.id}" ${p.id === me().person_id ? 'selected' : ''}>${esc(p.name ?? p.email)}</option>`).join('')}</select></label>
+        <label class="f">Initiating visit<input name="initiating_visit_on" type="date" max="${todayISO()}"></label>
+        <label class="f">Starts<input name="started_on" type="date" value="${todayISO()}"></label>
+      </div>
+      <p class="dim small">Leave the initiating visit blank to use the patient's last completed visit with the billing practitioner.</p>
+      <label class="row small muted" style="gap:8px"><input type="checkbox" name="consent" value="yes" style="width:18px;min-height:18px"> The patient agreed to this program today, and was told about any cost sharing</label>
+      <p class="err"></p><button class="primary" type="submit">Enroll</button></form>`,
+    async (d) => {
+      await post(`/orgs/${state.orgId}/patients/${patientId}/programs`, { ...d, consent: d.consent === 'yes' });
+      toast('Enrolled');
+    },
+  );
+  const pick = document.getElementById('prog-pick');
+  pick.onchange = () => (document.getElementById('prog-about').textContent = programs[pick.value].about);
+}
+
+/** Program buttons on the chart and the caseload. */
+function bindProgramButtons(rows) {
+  const label = (id) => {
+    const r = rows.find((x) => x.program_id === id);
+    return r ? `${PROGRAM_NAME[r.program]} · ${r.patient ?? ''}` : '';
+  };
+  const main = document.getElementById('main');
+  main.querySelectorAll('[data-logtime]').forEach((b) => (b.onclick = () => logTimeModal(b.dataset.logtime, label(b.dataset.logtime))));
+  main.querySelectorAll('[data-timeview]').forEach((b) => (b.onclick = () => timeModal(b.dataset.timeview, label(b.dataset.timeview)).catch((err) => toast(err.message, true))));
+  main.querySelectorAll('[data-consent-prog]').forEach(
+    (b) =>
+      (b.onclick = () =>
+        confirm('Record that the patient agreed to this program today (and was told about cost sharing)?') &&
+        act(() => api('PATCH', `/orgs/${state.orgId}/programs/${b.dataset.consentProg}`, { consent: true }), 'Consent recorded')),
+  );
+  main.querySelectorAll('[data-endprog]').forEach(
+    (b) => (b.onclick = () => confirm('End this program? Time already logged still bills for its month.') && act(() => api('PATCH', `/orgs/${state.orgId}/programs/${b.dataset.endprog}`, { status: 'ended' }), 'Program ended')),
+  );
+}
+
+function programsCard(rows, patientId) {
+  return `<section class="card" aria-label="Programs"><div class="card-h"><h2>Programs</h2><button class="sm" id="enroll" data-patient="${patientId}">Enroll</button></div>
+    ${
+      rows.length
+        ? `<ul class="list">${rows
+            .map(
+              (r) => `<li style="flex-direction:column;align-items:stretch"><div class="row" style="justify-content:space-between"><span><b>${esc(PROGRAM_NAME[r.program])}</b> <span class="muted">${esc(r.condition ?? '')}</span></span>${blockerBadge(r)}</div>
+              ${progress(r)}
+              <div class="dim small">${esc(dot(r.navigator && `navigator ${r.navigator}`, r.billing_provider && `bills under ${r.billing_provider}`))}</div>
+              <div class="row"><button class="sm primary" data-logtime="${r.program_id}">Log time</button><button class="sm" data-timeview="${r.program_id}">Entries</button>${r.consent_at ? '' : `<button class="sm" data-consent-prog="${r.program_id}">Record consent</button>`}<button class="sm danger" data-endprog="${r.program_id}">End</button></div></li>`,
+            )
+            .join('')}</ul>`
+        : '<div class="empty">Not enrolled. Navigation (PIN), community health integration (CHI) and chronic care management (CCM) pay for the coordination your team already does.</div>'
+    }</section>`;
+}
+
+function carePlanCard(plan) {
+  const items = plan?.items ?? [];
+  const li = (i) => {
+    const overdue = i.status === 'open' && i.due_on && String(i.due_on).slice(0, 10) < todayISO();
+    return `<li><span><span class="${i.status === 'done' ? 'done-text' : ''}">${esc(i.text)}</span><div class="sub">${esc(dot(i.kind === 'task' && (i.owner ?? 'Patient'), i.due_on && `due ${String(i.due_on).slice(0, 10)}`))}${overdue ? ' · <span class="flag-high">overdue</span>' : ''}</div></span>
+      <span class="row">${i.status === 'open' ? `<button class="sm" data-item="${i.id}" data-s="done">Done</button>` : `<button class="sm" data-item="${i.id}" data-s="open">Reopen</button>`}<button class="sm danger" data-item="${i.id}" data-s="dropped" aria-label="Remove">×</button></span></li>`;
+  };
+  const goals = items.filter((i) => i.kind === 'goal');
+  const tasks = items.filter((i) => i.kind === 'task');
+  return `<section class="card" aria-label="Care plan"><div class="card-h"><h2>${esc(plan?.title ?? 'Care plan')}</h2>
+      <span class="row">${plan ? (plan.shared ? '<span class="badge b-ok">shared with patient</span>' : '<span class="badge">team only</span>') : ''}
+      ${plan ? `<button class="sm" id="plan-share" data-on="${plan.shared ? '' : 'yes'}">${plan.shared ? 'Unshare' : 'Share'}</button>` : ''}<button class="sm" id="plan-edit">${plan ? 'Edit' : 'Start a plan'}</button><button class="sm primary" id="plan-add">Add</button></span></div>
+    ${
+      plan
+        ? `${plan.summary ? `<div class="card-b muted" style="white-space:pre-line">${esc(plan.summary)}</div>` : ''}
+      ${goals.length ? `<div class="label" style="padding:10px 18px 0">Goals</div><ul class="list">${goals.map(li).join('')}</ul>` : ''}
+      ${tasks.length ? `<div class="label" style="padding:10px 18px 0">Tasks</div><ul class="list">${tasks.map(li).join('')}</ul>` : ''}
+      ${items.length ? '' : '<div class="empty">No goals or tasks yet.</div>'}`
+        : '<div class="empty">No care plan. Write down the problem, the goals, and who does what by when; share it so the patient sees it in their portal.</div>'
+    }</section>`;
+}
+
+function bindCarePlan(patientId, plan) {
+  document.getElementById('plan-edit').onclick = () =>
+    openModal(
+      'Care plan',
+      `<form class="stack"><label class="f">Title<input name="title" value="${esc(plan?.title ?? 'Care plan')}"></label>
+       <label class="f">Problem and approach<textarea name="summary" placeholder="What we are working on, and how">${esc(plan?.summary ?? '')}</textarea></label>
+       <p class="err"></p><button class="primary" type="submit">Save</button></form>`,
+      async (d) => {
+        await api('PUT', `/orgs/${state.orgId}/patients/${patientId}/care-plan`, d);
+        toast('Care plan saved');
+      },
+    );
+  document.getElementById('plan-share')?.addEventListener('click', (e) => {
+    const on = e.currentTarget.dataset.on === 'yes';
+    act(() => api('PUT', `/orgs/${state.orgId}/patients/${patientId}/care-plan`, { shared: on }), on ? 'Shared to the portal' : 'Hidden from the portal');
+  });
+  document.getElementById('plan-add').onclick = async () => {
+    const { people: team } = await get(`/orgs/${state.orgId}/people?type=team`);
+    openModal(
+      'Add to the care plan',
+      `<form class="stack"><label class="f">Type<select name="kind"><option value="task">Task</option><option value="goal">Goal</option></select></label>
+       <label class="f">What<input name="text" required placeholder="Get prior authorization for the PET scan"></label>
+       <div class="grid2"><label class="f">Who<select name="owner_id"><option value="patient">The patient</option>${team.map((p) => `<option value="${p.id}" ${p.id === me().person_id ? 'selected' : ''}>${esc(p.name ?? p.email)}</option>`).join('')}</select></label>
+       <label class="f">Due<input name="due_on" type="date"></label></div>
+       <p class="err"></p><button class="primary" type="submit">Add</button></form>`,
+      async (d) => {
+        await post(`/orgs/${state.orgId}/patients/${patientId}/care-plan/items`, d);
+        toast('Added');
+      },
+    );
+  };
+  document.querySelectorAll('[data-item]').forEach(
+    (b) => (b.onclick = () => act(() => api('PATCH', `/orgs/${state.orgId}/care-plan-items/${b.dataset.item}`, { status: b.dataset.s }), b.dataset.s === 'done' ? 'Done' : b.dataset.s === 'dropped' ? 'Removed' : 'Reopened')),
+  );
+}
+
+async function viewCaseload(q) {
+  const month = q.get('month') ?? thisMonthISO();
+  const scope = q.get('all') === '1' ? '&all=1' : q.get('mine') === '1' ? '&mine=1' : '';
+  const { caseload, mine } = await get(`/orgs/${state.orgId}/caseload?month=${month}${scope}`);
+  const link = (m, s = scope) => `/app/caseload?month=${m}${s}`;
+  const ready = caseload.filter((r) => !r.blockers.length && r.lines.length).length;
+  const html = `
+  <div class="head">
+    <div><h1>Caseload</h1><div class="dim small">${fmtMonth(month)} · ${caseload.length} enrollment${caseload.length === 1 ? '' : 's'} · ${ready} ready to bill</div></div>
+    <div class="row">
+      <a class="btn sm" href="${link(shiftMonth(month, -1))}" aria-label="Previous month">‹</a>
+      <a class="btn sm" href="${link(thisMonthISO())}">This month</a>
+      <a class="btn sm" href="${link(shiftMonth(month, 1))}" aria-label="Next month">›</a>
+      <a class="btn sm" href="${link(month, mine ? '&all=1' : '&mine=1')}">${mine ? 'Everyone\'s patients' : 'Only mine'}</a>
+    </div>
+  </div>
+  <section class="card">${
+    caseload.length
+      ? `<div class="scroll"><table><thead><tr><th>Patient</th><th>Program</th><th style="min-width:200px">This month</th><th>Tasks</th><th>Billing</th><th></th></tr></thead><tbody>${caseload
+          .map(
+            (r) => `<tr><td><a href="/app/patients/${r.patient_id}">${esc(r.patient ?? 'Unnamed')}</a><div class="dim small">${esc(r.navigator ?? '')}</div></td>
+            <td>${esc(PROGRAM_NAME[r.program])}<div class="dim small">${esc(r.condition ?? '')}</div></td>
+            <td>${progress(r)}</td>
+            <td>${r.open_tasks ? `${r.open_tasks} open${r.overdue_tasks ? ` · <span class="flag-high">${r.overdue_tasks} overdue</span>` : ''}` : '<span class="dim small">none</span>'}</td>
+            <td>${blockerBadge(r)}</td>
+            <td style="text-align:right"><span class="row" style="justify-content:flex-end;flex-wrap:nowrap"><button class="sm primary" data-logtime="${r.program_id}">Log time</button><button class="sm" data-timeview="${r.program_id}">Entries</button></span></td></tr>`,
+          )
+          .join('')}</tbody></table></div>`
+      : `<div class="empty">${mine ? 'No patients are assigned to you yet. ' : ''}Enroll patients from their chart (Programs → Enroll); they show up here with their minutes toward each month's billing codes.</div>`
+  }</section>
+  <p class="dim small">Minutes count toward PIN (G0023 at 60, G0024 per 30 more), CHI (G0019/G0022) and CCM (99490 at 20, 99439 per 20 more, up to two). The superbill lists what is ready.</p>`;
+  return { html, bind: () => bindProgramButtons(caseload) };
+}
+
+async function viewSuperbill(q) {
+  const month = q.get('month') ?? thisMonthISO();
+  const rule = q.get('rule') === 'midpoint' ? 'midpoint' : 'full';
+  const sb = await get(`/orgs/${state.orgId}/superbill?month=${month}&rule=${rule}`);
+  const link = (m, r = rule) => `/app/superbill?month=${m}${r === 'midpoint' ? '&rule=midpoint' : ''}`;
+  const totals = Object.entries(sb.totals);
+  const html = `
+  <div class="head">
+    <div><h1>Superbill</h1><div class="dim small">${fmtMonth(month)} · ${sb.ready} ready · ${sb.held} on hold · ${sb.under} under the time threshold</div></div>
+    <div class="row">
+      <a class="btn sm" href="${link(shiftMonth(month, -1))}" aria-label="Previous month">‹</a>
+      <a class="btn sm" href="${link(thisMonthISO())}">This month</a>
+      <a class="btn sm" href="${link(shiftMonth(month, 1))}" aria-label="Next month">›</a>
+      <select id="rule" class="inline" aria-label="Time rule"><option value="full" ${rule === 'full' ? 'selected' : ''}>Full time per unit</option><option value="midpoint" ${rule === 'midpoint' ? 'selected' : ''}>Midpoint rule</option></select>
+      <a class="btn primary sm" href="/api/v1/orgs/${state.orgId}/superbill?month=${month}&rule=${rule}&format=csv" download>Download CSV</a>
+    </div>
+  </div>
+  <div class="cols">
+    <section class="card wide">${
+      sb.rows.length
+        ? `<div class="scroll"><table><thead><tr><th>Patient</th><th>Program</th><th>Billing practitioner</th><th>Minutes</th><th>Codes</th><th>Status</th></tr></thead><tbody>${sb.rows
+            .map(
+              (r) => `<tr><td style="white-space:nowrap"><a href="/app/patients/${r.patient_id}">${esc(r.patient ?? 'Unnamed')}</a><div class="dim small">${r.dob ? `born ${esc(r.dob)}` : ''}</div></td>
+              <td>${esc(r.program_name)}<div class="dim small">${esc(r.condition ?? '')}</div></td>
+              <td>${esc(r.billing_provider ?? '—')}<div class="dim small mono">${esc(r.billing_npi ?? '')}</div></td>
+              <td class="mono">${r.minutes}</td>
+              <td class="mono">${r.lines.length ? esc(codesText(r)) : `<span class="dim small">${r.next_unit_in} min short</span>`}</td>
+              <td>${r.ready ? '<span class="badge b-ok">ready</span>' : r.lines.length ? `<span class="badge b-warn" title="${esc(r.blockers.join('\n'))}">hold</span><div class="dim small">${esc(r.blockers.join('; '))}</div>` : '<span class="badge">under threshold</span>'}</td></tr>`,
+            )
+            .join('')}</tbody></table></div>`
+        : '<div class="empty">No navigation time logged this month.</div>'
+    }</section>
+    <div class="narrow">
+      <section class="card"><div class="card-h"><h2>Ready to bill</h2></div>${
+        totals.length ? `<ul class="list">${totals.map(([code, n]) => `<li><span class="mono">${esc(code)}</span><span class="mono">× ${n}</span></li>`).join('')}</ul>` : '<div class="empty">Nothing ready yet.</div>'
+      }</section>
+      <section class="card"><div class="card-b dim small stack">
+        <span>One line per code, per patient, per month, for your biller or clearinghouse. Prices vary by locality, so none are shown.</span>
+        <span><b>Full time</b> counts a unit only when its whole time is met. <b>Midpoint</b> applies the CPT rule (G0023 at 31 minutes); check that your payers accept it before using it. CCM always needs its full 20 minutes.</span>
+        <span>On hold means a claim would be missing something: consent (renewed yearly for PIN and CHI), the initiating visit, the billing practitioner's NPI, or for CCM a care plan.</span>
+      </div></section>
+    </div>
+  </div>`;
+  return {
+    html,
+    bind() {
+      document.getElementById('rule').onchange = (e) => go(link(month, e.target.value));
+    },
+  };
+}
+
 /* ------------------------------------------------------------------ team -- */
 
 async function viewTeam() {
@@ -762,11 +1071,12 @@ async function viewTeam() {
   const html = `
   <div class="head"><div><h1>Team</h1><div class="dim small">${people.length} seat${people.length === 1 ? '' : 's'} · patients and leads are free</div></div>
     ${admin ? '<button class="primary" id="invite">Invite</button>' : ''}</div>
-  <section class="card"><div class="scroll"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>
+  <section class="card"><div class="scroll"><table><thead><tr><th>Name</th><th>Email</th><th>NPI</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>
     ${people
       .map(
         (p) => `<tr><td>${esc(p.name ?? '—')}</td><td class="muted">${esc(p.email ?? '')}</td>
-        <td>${admin && p.user_type !== 'owner' ? `<select class="inline" data-role="${p.id}" aria-label="Role">${['org_manager', 'provider', 'staff'].map((t) => `<option value="${t}" ${t === p.user_type ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`).join('')}</select>` : `<span class="badge b-team">${TYPE_LABEL[p.user_type]}</span>`}</td>
+        <td>${CLINICIAN.includes(p.user_type) ? (admin ? `<button class="link small mono" data-npi="${p.id}" data-v="${esc(p.npi ?? '')}">${esc(p.npi ?? 'add NPI')}</button>` : `<span class="mono small">${esc(p.npi ?? '—')}</span>`) : '<span class="dim small">—</span>'}</td>
+        <td>${admin && p.user_type !== 'owner' ? `<select class="inline" data-role="${p.id}" aria-label="Role">${['org_manager', 'provider', 'staff', 'advocate'].map((t) => `<option value="${t}" ${t === p.user_type ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`).join('')}</select>` : `<span class="badge b-team">${TYPE_LABEL[p.user_type]}</span>`}</td>
         <td>${p.has_account ? '<span class="badge b-ok">active</span>' : '<span class="badge">invited</span>'}</td>
         <td style="text-align:right">${admin && p.user_type !== 'owner' ? `<button class="sm danger" data-remove="${p.id}">Remove</button>` : ''}</td></tr>`,
       )
@@ -776,6 +1086,20 @@ async function viewTeam() {
     html,
     bind() {
       document.getElementById('invite')?.addEventListener('click', () => personModal('team'));
+      document.querySelectorAll('[data-npi]').forEach(
+        (b) =>
+          (b.onclick = () =>
+            openModal(
+              'NPI',
+              `<form class="stack"><label class="f">National Provider Identifier<input name="npi" inputmode="numeric" pattern="\\d{10}" maxlength="10" value="${esc(b.dataset.v)}" placeholder="10 digits"></label>
+               <p class="dim small">Printed on the superbill as the billing practitioner. Look it up at npiregistry.cms.hhs.gov.</p><p class="err"></p>
+               <button class="primary" type="submit">Save</button></form>`,
+              async (d) => {
+                await api('PATCH', `/orgs/${state.orgId}/people/${b.dataset.npi}`, { npi: d.npi ?? '' });
+                toast('NPI saved');
+              },
+            )),
+      );
       document.querySelectorAll('[data-role]').forEach(
         (s) => (s.onchange = () => act(() => api('PATCH', `/orgs/${state.orgId}/people/${s.dataset.role}`, { user_type: s.value }), 'Role changed')),
       );
@@ -965,6 +1289,17 @@ async function renderPortal() {
           : '<section class="card"><div class="empty">No upcoming visits. Call the practice to book.</div></section>'
       }
       ${pr.appointments.length > 1 ? `<section class="card"><div class="card-h"><h2>Upcoming</h2></div><ul class="list">${pr.appointments.slice(1).map((a) => `<li><span>${fmtDate(a.starts_at)} ${fmtTime(a.starts_at)}<div class="sub">${esc(a.provider ?? '')} · ${a.mode === 'video' ? 'video' : esc(a.location ?? '')}</div></span><span class="badge ${STATUS_BADGE[a.status]}">${nice(a.status)}</span></li>`).join('')}</ul></section>` : ''}
+      ${
+        pr.care_plan
+          ? `<section class="card" aria-label="Your care plan"><div class="card-h"><h2>${esc(pr.care_plan.title)}</h2><span class="dim small">${esc(pr.care_plan.owner ? `with ${pr.care_plan.owner}` : '')}</span></div>
+        ${pr.care_plan.summary ? `<div class="card-b muted" style="white-space:pre-line">${esc(pr.care_plan.summary)}</div>` : ''}
+        ${pr.care_plan.items.length ? `<ul class="list">${pr.care_plan.items
+          .map(
+            (i) => `<li><span><span class="${i.status === 'done' ? 'done-text' : ''}">${i.kind === 'goal' ? '<b>Goal:</b> ' : ''}${esc(i.text)}</span><div class="sub">${esc(dot(i.kind === 'task' && i.owner, i.due_on && `by ${String(i.due_on).slice(0, 10)}`))}</div></span>${i.status === 'done' ? '<span class="badge b-ok">done</span>' : ''}</li>`,
+          )
+          .join('')}</ul>` : ''}</section>`
+          : ''
+      }
       <section class="card"><div class="card-h"><h2>Results</h2></div>${
         pr.labs.length
           ? `<ul class="list">${Object.entries(tests)

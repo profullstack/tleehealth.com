@@ -3,7 +3,9 @@
 Telehealth and practice management on the CoinPay/Profullstack stack: scheduling,
 prescriptions, tests and labs, after-visit summaries, notifications and newsletters,
 AI follow-up calls on every appointment (Telnyx), and health-record import from any
-provider. One account can own many orgs; each org has locations, a manager and a bill.
+provider. Patient advocates (navigators) keep care plans and log their time
+against care-management programs; the monthly superbill turns those minutes into
+Medicare's PIN (G0023/G0024), CHI (G0019/G0022) and CCM (99490/99439) codes. One account can own many orgs; each org has locations, a manager and a bill.
 
 **Pricing:** each org pays for every user on its team: $10/seat/month, or $199/month for
 up to 1,000 seats, whichever is lower. Patients and leads are free.

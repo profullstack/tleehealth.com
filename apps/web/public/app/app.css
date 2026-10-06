@@ -123,3 +123,9 @@ dialog .m-b { padding: 18px 20px 20px; }
 .hero-card { border: 1px solid var(--accent); background: #0F1A15; border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
 .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase; }
 .keybox { font-family: var(--mono); font-size: 13px; background: #080B0A; border: 1px solid var(--line-2); border-radius: 10px; padding: 12px; word-break: break-all; }
+
+/* navigation: minutes toward the next billable unit */
+.meter { position: relative; height: 6px; border-radius: 99px; background: #1C2220; overflow: hidden; min-width: 90px; }
+.meter > i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 99px; }
+.meter.held > i { background: var(--warn); }
+.done-text { text-decoration: line-through; color: var(--dim); }

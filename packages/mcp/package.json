@@ -1,7 +1,7 @@
 {
   "name": "@profullstack/tleehealth-mcp",
-  "version": "0.2.0",
-  "description": "MCP server for tleehealth.com: read the practice schedule and API health from any MCP client.",
+  "version": "0.3.0",
+  "description": "MCP server for tleehealth.com: read the practice schedule, the navigation caseload and superbill, and log navigation time from any MCP client.",
   "type": "module",
   "license": "MIT",
   "author": "Profullstack, Inc.",
@@ -11,6 +11,6 @@
   "bin": { "tleehealth-mcp": "./bin/tleehealth-mcp.mjs" },
   "exports": { ".": "./src/server.js" },
   "files": ["bin", "src", "README.md"],
-  "dependencies": { "@profullstack/tleehealth": "^0.2.0" },
+  "dependencies": { "@profullstack/tleehealth": "^0.3.0" },
   "keywords": ["mcp", "telehealth", "practice-management", "scheduling"]
 }
