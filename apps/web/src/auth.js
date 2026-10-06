@@ -61,7 +61,7 @@ export async function findOrCreateUser(email) {
   return user;
 }
 
-const ORG_ROLE = { owner: 'owner', org_manager: 'admin', provider: 'member', staff: 'member' };
+const ORG_ROLE = { owner: 'owner', org_manager: 'admin', provider: 'member', staff: 'member', advocate: 'member' };
 
 /**
  * Attach every org_people row added under this address to the account, and give

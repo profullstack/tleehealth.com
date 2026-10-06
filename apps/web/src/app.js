@@ -123,7 +123,9 @@ app.get('/llms.txt', (c) =>
 
 > Telehealth and practice management: scheduling across offices, prescriptions and
 > refills, labs, after-visit summaries and a patient portal. One account can own many
-> practices; each has locations, a team and its own bill.
+> practices; each has locations, a team and its own bill. Patient advocates run care
+> plans and log navigation time, and the superbill turns it into Medicare's
+> care-management codes (PIN, CHI, CCM).
 
 Pricing: $10 per team seat per month, or $199/month for up to 1,000 seats. Patients and leads are free.
 
@@ -143,6 +145,14 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - GET|PUT /orgs/:org/call-settings          AI calls: on/off, hours before/after, calling window, attempts
 - POST /orgs/:org/appointments/:id/call     call the patient now ({"kind":"reminder"|"followup"})
 - GET /orgs/:org/calls/:id                  outcome, summary and transcript; POST .../resolve when handled
+- GET|PUT /orgs/:org/patients/:id/care-plan, POST .../care-plan/items, PATCH /orgs/:org/care-plan-items/:id
+                                            goals and tasks with owners and due dates; shared plans show in the portal
+- POST /orgs/:org/patients/:id/programs     enroll in PIN, PIN peer support, CHI or CCM (consent, initiating visit, billing practitioner)
+- PATCH /orgs/:org/programs/:id             consent (renews it), billing practitioner, end
+- POST /orgs/:org/programs/:id/time         log navigation minutes ({"minutes", "activity", "note", "performed_on"})
+- GET /orgs/:org/caseload?month=YYYY-MM     enrollments, minutes toward G0023/G0024, G0019/G0022, 99490/99439, open tasks
+- GET /orgs/:org/superbill?month=YYYY-MM&rule=full|midpoint&format=csv
+                                            the month's billable codes per patient, ready or on hold with the reason
 
 ## Tools
 - CLI + TUI: npm i -g @profullstack/tleehealth  (or: curl -fsSL https://tleehealth.com/install.sh | sh)

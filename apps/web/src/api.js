@@ -6,6 +6,7 @@ import * as auth from './auth.js';
 import { config, monthlyCents } from './config.js';
 import { sendAddedToOrg, sendLoginLink } from './mail.js';
 import * as calls from './calls.js';
+import * as nav from './navigation.js';
 
 /**
  * /api/v1: the only thing any client talks to. The browser app, the CLI, the TUI
@@ -13,10 +14,12 @@ import * as calls from './calls.js';
  */
 export const api = new Hono();
 
-const TEAM = ['owner', 'org_manager', 'provider', 'staff'];
+const TEAM = ['owner', 'org_manager', 'provider', 'staff', 'advocate'];
 const ADMIN = ['owner', 'org_manager'];
 const CLINICIAN = ['owner', 'provider'];
-const TYPES = ['owner', 'org_manager', 'provider', 'staff', 'patient', 'lead'];
+// Who sees the superbill: the people who sign or submit claims.
+const BILLERS = ['owner', 'org_manager', 'provider'];
+const TYPES = ['owner', 'org_manager', 'provider', 'staff', 'advocate', 'patient', 'lead'];
 const TRIAL_DAYS = 14;
 
 class HttpError extends Error {
@@ -291,7 +294,7 @@ api.get('/orgs/:org/people', async (c) => {
   const q = str(c.req.query('q'), 80);
   const like = q ? `%${q.replace(/[%_\\]/g, '\\$&')}%` : null;
   const people = await db()`
-    select id, user_type, name, email, phone, dob, source, user_id is not null as has_account, created_at
+    select id, user_type, name, email, phone, dob, source, npi, user_id is not null as has_account, created_at
     from org_people
     where org_id = ${me.org_id} and status = 'active' and user_type::text = any(${types})
       ${like ? db()`and (name ilike ${like} or email ilike ${like} or phone ilike ${like})` : db()``}
@@ -302,7 +305,7 @@ api.get('/orgs/:org/people', async (c) => {
 api.post('/orgs/:org/people', async (c) => {
   const b = await body(c);
   const type = str(b.user_type, 20);
-  if (!TYPES.includes(type) || type === 'owner') return c.json({ error: 'user_type must be org_manager, provider, staff, patient or lead' }, 400);
+  if (!TYPES.includes(type) || type === 'owner') return c.json({ error: 'user_type must be org_manager, provider, staff, advocate, patient or lead' }, 400);
   // Adding team needs an admin; any team member can add patients and leads.
   const { me, user } = await member(c, c.req.param('org'), TEAM.includes(type) ? ADMIN : TEAM);
   await requireActive(me.org_id);
@@ -355,10 +358,17 @@ api.patch('/orgs/:org/people/:id', async (c) => {
     if (!TYPES.includes(b.user_type)) fail(400, 'unknown user type');
     type = b.user_type;
   }
+  let npi;
+  if (b.npi !== undefined) {
+    if (!TEAM.includes(p.user_type)) fail(400, 'only team members have an NPI');
+    npi = str(b.npi, 10);
+    if (npi && !/^\d{10}$/.test(npi)) fail(400, 'an NPI is 10 digits');
+  }
   const [row] = await db()`
     update org_people set user_type = ${type},
       name = coalesce(${str(b.name, 120)}, name), phone = coalesce(${str(b.phone, 40)}, phone),
       dob = coalesce(${str(b.dob, 10)}, dob), notes = coalesce(${str(b.notes, 2000)}, notes),
+      npi = case when ${npi !== undefined} then ${npi ?? null} else npi end,
       call_consent_at = case when ${b.call_consent === true} then coalesce(call_consent_at, now())
                              when ${b.call_consent === false} then null else call_consent_at end,
       call_opt_out_at = case when ${b.call_consent === true} then null else call_opt_out_at end
@@ -403,8 +413,13 @@ api.get('/orgs/:org/patients/:id', async (c) => {
   const callRows = await sql`select id, appointment_id, kind, status, due_at, summary, flagged, flag_reason, resolved_at,
                                     skip_reason, attempts, ended_at, transcript is not null as has_transcript
                              from calls where patient_id = ${p.id} order by coalesce(ended_at, due_at) desc limit 50`;
+  const month = nav.thisMonth();
+  const programs = await programRows(me.org_id, { ...nav.monthRange(month), month }, (sql) => sql`and cp.patient_id = ${p.id} and cp.status = 'active'`);
   await audit(me.org_id, user.id, 'patient.read', p.id);
-  return c.json({ patient: p, appointments, medications, labs, summaries, refills, calls: callRows });
+  return c.json({
+    patient: p, appointments, medications, labs, summaries, refills, calls: callRows,
+    care_plan: await carePlan(p.id), programs, month,
+  });
 });
 
 /* ------------------------------------------------------------ scheduling -- */
@@ -668,6 +683,304 @@ api.post('/orgs/:org/summaries/:id/sign', async (c) => {
   return c.json({ summary: s });
 });
 
+/* ------------------------------------------------- care plans + navigation -- */
+// The advocate's work: a care plan per patient, enrollment in a care-management
+// program (PIN, CHI, CCM), minutes logged against it, and the month's superbill.
+
+const day = (v, what) => {
+  const s = str(v, 10);
+  if (s && !DATE.test(s)) fail(400, `${what} must be YYYY-MM-DD`);
+  return s;
+};
+const monthOf = (c) => {
+  const m = c.req.query('month') ?? nav.thisMonth();
+  try {
+    return { month: m, ...nav.monthRange(m) };
+  } catch (err) {
+    fail(400, err.message);
+  }
+};
+
+async function carePlan(patientId) {
+  const [plan] = await db()`
+    select pl.*, o.name as owner from care_plans pl left join org_people o on o.id = pl.owner_id
+    where pl.patient_id = ${patientId} and pl.status = 'active'`;
+  if (!plan) return null;
+  const items = await db()`
+    select i.*, o.name as owner from care_plan_items i left join org_people o on o.id = i.owner_id
+    where i.plan_id = ${plan.id} and i.status <> 'dropped'
+    order by i.kind, i.status desc, i.due_on nulls last, i.created_at`;
+  return { ...plan, items };
+}
+
+/** Enrollments with their minutes in a month, decorated with codes and blockers. */
+async function programRows(orgId, { start, end, month }, filter, rule = 'full') {
+  const sql = db();
+  const rows = await sql`
+    select cp.*, p.name as patient, p.dob, bp.name as billing_provider, bp.npi as billing_npi, nv.name as navigator,
+           exists(select 1 from care_plans pl where pl.patient_id = cp.patient_id and pl.status = 'active') as has_care_plan,
+           coalesce((select sum(t.minutes) from care_time t where t.program_id = cp.id
+                     and t.performed_on >= ${start} and t.performed_on < ${end}), 0)::int as minutes
+    from care_programs cp join org_people p on p.id = cp.patient_id
+    left join org_people bp on bp.id = cp.billing_provider_id left join org_people nv on nv.id = cp.navigator_id
+    where cp.org_id = ${orgId} ${filter(sql)}
+    order by p.name nulls last, cp.program`;
+  return rows.map((r) => ({
+    ...nav.superbillRow(r, r.minutes, month, rule),
+    status: r.status,
+    navigator_id: r.navigator_id,
+    billing_provider_id: r.billing_provider_id,
+    consent_at: r.consent_at,
+    initiating_visit_on: nav.ymd(r.initiating_visit_on),
+    started_on: nav.ymd(r.started_on),
+  }));
+}
+
+api.get('/navigation/programs', (c) => c.json({ programs: nav.PROGRAMS, activities: nav.ACTIVITIES, time_rules: nav.TIME_RULES }));
+
+api.get('/orgs/:org/patients/:id/care-plan', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  const p = await personIn(me.org_id, c.req.param('id'), ['patient'], 'patient');
+  await audit(me.org_id, user.id, 'care_plan.read', p.id);
+  return c.json({ care_plan: await carePlan(p.id) });
+});
+
+api.put('/orgs/:org/patients/:id/care-plan', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  await requireActive(me.org_id);
+  const p = await personIn(me.org_id, c.req.param('id'), ['patient'], 'patient');
+  const b = await body(c);
+  const owner = b.owner_id ? await personIn(me.org_id, b.owner_id, TEAM, 'owner') : null;
+  const shared = b.shared === undefined ? null : Boolean(b.shared);
+  const [plan] = await db()`
+    insert into care_plans (org_id, patient_id, title, summary, owner_id, shared)
+    values (${me.org_id}, ${p.id}, ${str(b.title, 120) ?? 'Care plan'}, ${str(b.summary, 5000)}, ${owner?.id ?? me.id}, ${shared ?? false})
+    on conflict (patient_id) where status = 'active' do update set
+      title = coalesce(${str(b.title, 120)}, care_plans.title),
+      summary = coalesce(${str(b.summary, 5000)}, care_plans.summary),
+      owner_id = coalesce(${owner?.id ?? null}::uuid, care_plans.owner_id),
+      shared = coalesce(${shared}::boolean, care_plans.shared),
+      updated_at = now()
+    returning id`;
+  await audit(me.org_id, user.id, 'care_plan.save', plan.id);
+  return c.json({ care_plan: await carePlan(p.id) });
+});
+
+api.post('/orgs/:org/patients/:id/care-plan/close', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  const p = await personIn(me.org_id, c.req.param('id'), ['patient'], 'patient');
+  const [plan] = await db()`update care_plans set status = 'closed', updated_at = now()
+                            where patient_id = ${p.id} and status = 'active' returning id`;
+  if (!plan) fail(404, 'no active care plan');
+  await audit(me.org_id, user.id, 'care_plan.close', plan.id);
+  return c.json({ ok: true });
+});
+
+api.post('/orgs/:org/patients/:id/care-plan/items', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  await requireActive(me.org_id);
+  const p = await personIn(me.org_id, c.req.param('id'), ['patient'], 'patient');
+  const b = await body(c);
+  const text = str(b.text, 500);
+  if (!text) fail(400, 'say what the goal or task is');
+  // No owner, or "patient": the patient's own to do. Otherwise someone on the team.
+  const owner = b.owner_id && b.owner_id !== 'patient' ? await personIn(me.org_id, b.owner_id, TEAM, 'owner') : null;
+  const sql = db();
+  const [plan] = await sql`
+    insert into care_plans (org_id, patient_id, owner_id) values (${me.org_id}, ${p.id}, ${me.id})
+    on conflict (patient_id) where status = 'active' do update set updated_at = now()
+    returning id`;
+  const [item] = await sql`
+    insert into care_plan_items (plan_id, org_id, kind, text, owner_id, due_on)
+    values (${plan.id}, ${me.org_id}, ${b.kind === 'goal' ? 'goal' : 'task'}, ${text}, ${owner?.id ?? null}, ${day(b.due_on, 'due_on')})
+    returning *`;
+  await audit(me.org_id, user.id, 'care_plan.item.create', item.id);
+  return c.json({ item }, 201);
+});
+
+api.patch('/orgs/:org/care-plan-items/:id', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  await requireActive(me.org_id);
+  const b = await body(c);
+  if (b.status && !['open', 'done', 'dropped'].includes(b.status)) fail(400, 'status must be open, done or dropped');
+  const owner = b.owner_id && b.owner_id !== 'patient' ? await personIn(me.org_id, b.owner_id, TEAM, 'owner') : null;
+  const [item] = await db()`
+    update care_plan_items set
+      text = coalesce(${str(b.text, 500)}, text),
+      due_on = case when ${b.due_on !== undefined} then ${day(b.due_on, 'due_on')}::date else due_on end,
+      owner_id = case when ${b.owner_id !== undefined} then ${owner?.id ?? null}::uuid else owner_id end,
+      status = coalesce(${b.status ?? null}, status),
+      done_at = case when ${b.status === 'done'} then coalesce(done_at, now()) when ${b.status != null} then null else done_at end
+    where id = ${uuid(c.req.param('id'))} and org_id = ${me.org_id} returning *`;
+  if (!item) return c.json({ error: 'no such item' }, 404);
+  await audit(me.org_id, user.id, `care_plan.item.${b.status ?? 'update'}`, item.id);
+  return c.json({ item });
+});
+
+api.post('/orgs/:org/patients/:id/programs', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  await requireActive(me.org_id);
+  const p = await personIn(me.org_id, c.req.param('id'), ['patient'], 'patient');
+  const b = await body(c);
+  if (!nav.PROGRAMS[b.program]) fail(400, `program must be one of ${Object.keys(nav.PROGRAMS).join(', ')}`);
+  const navigator = b.navigator_id ? await personIn(me.org_id, b.navigator_id, TEAM, 'navigator') : me;
+  const biller = b.billing_provider_id ? await personIn(me.org_id, b.billing_provider_id, CLINICIAN, 'billing provider') : null;
+  let visit = day(b.initiating_visit_on, 'initiating_visit_on');
+  if (!visit && biller) {
+    // Default to the patient's last completed visit with the billing practitioner.
+    const [last] = await db()`
+      select to_char(starts_at, 'YYYY-MM-DD') as on from appointments
+      where patient_id = ${p.id} and provider_id = ${biller.id} and status = 'completed'
+      order by starts_at desc limit 1`;
+    visit = last?.on ?? null;
+  }
+  const [row] = await db()`
+    insert into care_programs (org_id, patient_id, program, condition, navigator_id, billing_provider_id,
+                               consent_at, consent_by, initiating_visit_on, started_on)
+    values (${me.org_id}, ${p.id}, ${b.program}, ${str(b.condition, 300)}, ${navigator.id}, ${biller?.id ?? null},
+            ${b.consent === true ? new Date() : null}, ${b.consent === true ? me.id : null}, ${visit},
+            ${day(b.started_on, 'started_on') ?? new Date().toISOString().slice(0, 10)})
+    returning *`;
+  await audit(me.org_id, user.id, `program.enroll.${b.program}`, row.id);
+  return c.json({ program: row }, 201);
+});
+
+api.patch('/orgs/:org/programs/:id', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  await requireActive(me.org_id);
+  const b = await body(c);
+  const navigator = b.navigator_id ? await personIn(me.org_id, b.navigator_id, TEAM, 'navigator') : null;
+  const biller = b.billing_provider_id ? await personIn(me.org_id, b.billing_provider_id, CLINICIAN, 'billing provider') : null;
+  const end = b.status === 'ended';
+  const [row] = await db()`
+    update care_programs set
+      condition = coalesce(${str(b.condition, 300)}, condition),
+      navigator_id = coalesce(${navigator?.id ?? null}::uuid, navigator_id),
+      billing_provider_id = coalesce(${biller?.id ?? null}::uuid, billing_provider_id),
+      initiating_visit_on = coalesce(${day(b.initiating_visit_on, 'initiating_visit_on')}::date, initiating_visit_on),
+      consent_at = case when ${b.consent === true} then now() when ${b.consent === false} then null else consent_at end,
+      consent_by = case when ${b.consent === true} then ${me.id}::uuid when ${b.consent === false} then null else consent_by end,
+      status = case when ${end} then 'ended' else status end,
+      ended_on = case when ${end} then current_date else ended_on end,
+      updated_at = now()
+    where id = ${uuid(c.req.param('id'))} and org_id = ${me.org_id} returning *`;
+  if (!row) return c.json({ error: 'no such program' }, 404);
+  // Consent again renews it (PIN and CHI need it yearly); false withdraws it.
+  await audit(me.org_id, user.id, end ? 'program.end' : b.consent !== undefined ? `program.consent.${b.consent}` : 'program.update', row.id);
+  return c.json({ program: row });
+});
+
+api.post('/orgs/:org/programs/:id/time', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  await requireActive(me.org_id);
+  const b = await body(c);
+  const minutes = Math.round(Number(b.minutes));
+  if (!(minutes >= 1 && minutes <= 240)) fail(400, 'minutes must be 1 to 240');
+  const activity = b.activity ?? 'coordination';
+  if (!nav.ACTIVITIES.includes(activity)) fail(400, `activity must be one of ${nav.ACTIVITIES.join(', ')}`);
+  const on = day(b.performed_on, 'performed_on') ?? new Date().toISOString().slice(0, 10);
+  // A day of slack for time zones ahead of UTC.
+  if (on > new Date(Date.now() + 86400_000).toISOString().slice(0, 10)) fail(400, 'time cannot be logged in the future');
+  const [prog] = await db()`select * from care_programs where id = ${uuid(c.req.param('id'), 'program')} and org_id = ${me.org_id}`;
+  if (!prog) fail(404, 'no such program');
+  if (prog.status !== 'active') fail(409, 'that program has ended');
+  const [t] = await db()`
+    insert into care_time (org_id, program_id, patient_id, person_id, minutes, performed_on, activity, note, created_by)
+    values (${me.org_id}, ${prog.id}, ${prog.patient_id}, ${me.id}, ${minutes}, ${on}, ${activity}, ${str(b.note, 1000)}, ${user.id})
+    returning *`;
+  await audit(me.org_id, user.id, 'program.time', t.id);
+  const month = on.slice(0, 7);
+  const [r] = await programRows(me.org_id, { ...nav.monthRange(month), month }, (sql) => sql`and cp.id = ${prog.id}`);
+  return c.json({ time: t, program: r }, 201);
+});
+
+api.get('/orgs/:org/programs/:id/time', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  const m = monthOf(c);
+  const id = uuid(c.req.param('id'), 'program');
+  const time = await db()`
+    select t.*, p.name as by from care_time t left join org_people p on p.id = t.person_id
+    where t.program_id = ${id} and t.org_id = ${me.org_id}
+      and t.performed_on >= ${m.start} and t.performed_on < ${m.end}
+    order by t.performed_on desc, t.created_at desc`;
+  await audit(me.org_id, user.id, 'program.time.read', id);
+  return c.json({ month: m.month, time });
+});
+
+api.delete('/orgs/:org/time/:id', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  const admin = ADMIN.includes(me.user_type);
+  const [t] = await db()`
+    delete from care_time where id = ${uuid(c.req.param('id'))} and org_id = ${me.org_id}
+      and (${admin} or created_by = ${user.id}) returning id`;
+  if (!t) return c.json({ error: 'no such entry of yours' }, 404);
+  await audit(me.org_id, user.id, 'program.time.delete', t.id);
+  return c.json({ ok: true });
+});
+
+/** The advocate's queue: active enrollments, this month's minutes, open tasks. */
+api.get('/orgs/:org/caseload', async (c) => {
+  const { me } = await member(c, c.req.param('org'));
+  const m = monthOf(c);
+  // Advocates see their own patients unless they ask for everyone; others the reverse.
+  const mine = c.req.query('mine') === '1' || (me.user_type === 'advocate' && c.req.query('all') !== '1');
+  const rows = await programRows(
+    me.org_id,
+    m,
+    (sql) => sql`and cp.status = 'active' ${mine ? sql`and cp.navigator_id = ${me.id}` : sql``}`,
+  );
+  const ids = [...new Set(rows.map((r) => r.patient_id))];
+  const tasks = ids.length
+    ? await db()`select pl.patient_id, count(*)::int as open,
+                        count(*) filter (where i.due_on < current_date)::int as overdue
+                 from care_plan_items i join care_plans pl on pl.id = i.plan_id
+                 where pl.patient_id = any(${ids}) and pl.status = 'active' and i.status = 'open' and i.kind = 'task'
+                 group by pl.patient_id`
+    : [];
+  for (const r of rows) {
+    const t = tasks.find((x) => x.patient_id === r.patient_id);
+    r.open_tasks = t?.open ?? 0;
+    r.overdue_tasks = t?.overdue ?? 0;
+  }
+  return c.json({ month: m.month, mine, caseload: rows });
+});
+
+/** Everything billable in a month. ?rule=full|midpoint, ?format=csv. */
+api.get('/orgs/:org/superbill', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'), BILLERS);
+  const m = monthOf(c);
+  const rule = c.req.query('rule') ?? 'full';
+  if (!nav.TIME_RULES.includes(rule)) fail(400, 'rule must be full or midpoint');
+  // Every enrollment that overlapped the month and has time in it.
+  const rows = (
+    await programRows(
+      me.org_id,
+      m,
+      (sql) => sql`and cp.started_on < ${m.end} and (cp.ended_on is null or cp.ended_on >= ${m.start})`,
+      rule,
+    )
+  ).filter((r) => r.minutes > 0);
+  rows.sort((a, b) => Number(b.ready) - Number(a.ready));
+  await audit(me.org_id, user.id, 'superbill.read', m.month);
+  if (c.req.query('format') === 'csv')
+    return c.body(nav.superbillCsv(rows, { month: m.month, practice: me.org_name }), 200, {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': `attachment; filename="superbill-${m.month}.csv"`,
+      'cache-control': 'no-store',
+    });
+  const totals = {};
+  for (const r of rows) if (r.ready) for (const l of r.lines) totals[l.code] = (totals[l.code] ?? 0) + l.units;
+  return c.json({
+    month: m.month,
+    rule,
+    rows,
+    totals,
+    ready: rows.filter((r) => r.ready).length,
+    held: rows.filter((r) => !r.ready && r.lines.length).length,
+    under: rows.filter((r) => !r.lines.length).length,
+  });
+});
+
 /* ----------------------------------------------------------- front desk -- */
 // Today's work in one call: the dashboard, the CLI's `schedule`, the TUI and the
 // MCP get_schedule tool all read this.
@@ -765,8 +1078,20 @@ api.get('/portal', async (c) => {
           from visit_summaries s left join org_people pr on pr.id = s.provider_id
           where s.patient_id = ${p.id} and s.status = 'signed' order by s.signed_at desc limit 20`,
     ]);
+    // A care plan shows once the team shares it, without internal fields.
+    const plan = await carePlan(p.id);
+    const care_plan = plan?.shared
+      ? {
+          title: plan.title,
+          summary: plan.summary,
+          owner: plan.owner,
+          updated_at: plan.updated_at,
+          items: plan.items.map((i) => ({ kind: i.kind, text: i.text, owner: i.owner ?? 'You', due_on: i.due_on, status: i.status })),
+        }
+      : null;
     await audit(p.org_id, user.id, 'portal.read', p.id);
     practices.push({
+      care_plan,
       org: { id: p.org_id, name: p.org_name },
       patient_id: p.id,
       calls_ok: Boolean(p.call_consent_at && !p.call_opt_out_at),
