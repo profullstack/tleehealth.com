@@ -20,6 +20,17 @@ describe('web', () => {
     }
     expect((await get('/patient')).status).toBe(301);
   });
+  test('terms and privacy pages are served and linked from the landing page', async () => {
+    const terms = await get('/terms');
+    expect(terms.status).toBe(200);
+    expect(await terms.text()).toContain('Terms of use');
+    const privacy = await get('/privacy');
+    expect(privacy.status).toBe(200);
+    expect(await privacy.text()).toContain('Disconnecting a provider deletes');
+    const home = await (await get('/')).text();
+    expect(home).toContain('href="/terms"');
+    expect(home).toContain('href="/privacy"');
+  });
   test('app assets are served', async () => {
     expect((await get('/assets/app.js')).headers.get('content-type')).toContain('javascript');
     expect((await get('/assets/app.css')).status).toBe(200);

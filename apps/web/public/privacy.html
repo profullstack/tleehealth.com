@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy policy · tleehealth</title>
+<link rel="icon" href="/icon.svg">
+<style>
+  body { font: 16px/1.6 system-ui, -apple-system, Segoe UI, sans-serif; background: #0b0f0d; color: #e6efe9; margin: 0; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+  a { color: #7cf2b0; }
+  h1 { font-size: 32px; letter-spacing: -.02em; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 32px 0 8px; }
+  .dim { color: #9fb0a7; font-size: 14px; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body><main>
+<p><a href="/">tleehealth</a></p>
+<h1>Privacy policy</h1>
+<p class="dim">Effective October 6, 2026 · Profullstack, Inc., 16375 Bonnie Lane, Los Gatos, CA 95032 · <a href="mailto:privacy@tleehealth.com">privacy@tleehealth.com</a></p>
+
+<p>tleehealth is a telehealth and practice-management service run by Profullstack, Inc. ("we"). This policy explains what we collect, why, who sees it, and how you control it. It covers tleehealth.com, the patient portal, the API, the command-line tools and the MCP server.</p>
+
+<h2>Health records you import from other providers</h2>
+<p>You can connect a patient portal you already use, such as MyChart, through the SMART on FHIR standard. You sign in on your provider's own site and choose to allow access; we never see your password there. With your authorization we copy what that provider's patient API returns, which can include:</p>
+<ul>
+  <li>personal information: name, date of birth, sex, phone numbers, email and postal addresses, medical record numbers and other identifiers, emergency contacts;</li>
+  <li>visits, after-visit summaries, clinical notes, lab results, imaging reports, medications, conditions, allergies, immunizations, procedures, care plans and insurance coverage;</li>
+  <li>files attached to those records, such as PDFs and images.</li>
+</ul>
+<p>We use these records only to show them to you, to let you download them, and to share them with a practice <strong>when you choose to</strong>. Access is read-only: we never write to your provider's records. The access tokens your provider issues are encrypted at rest (AES-256-GCM).</p>
+<p><strong>Your control:</strong> you can download everything at any time (a ZIP of readable files plus the raw data, or a single FHIR file). You can share a connection with a practice and stop sharing it at any time. Disconnecting a provider deletes its tokens and every record and file imported through it from our systems. Your provider keeps its own copy.</p>
+
+<h2>Information practices on tleehealth</h2>
+<p>When a practice uses tleehealth, it enters and manages records about its patients: appointments, medications, refill requests, lab results, visit summaries, care plans and navigation time. The practice controls that information. We process it on the practice's behalf to run the service. Every read and change of a patient chart is written to an audit log.</p>
+
+<h2>Account and usage data</h2>
+<ul>
+  <li>Your email address (sign-in is by emailed link or passkey; we store no passwords), your name, and the sessions, passkeys and API keys you create.</li>
+  <li>For practices: billing records for prepaid months, paid in cryptocurrency through CoinPay.</li>
+  <li>Standard server logs (IP address, user agent, request path) kept for security and debugging.</li>
+</ul>
+
+<h2>Who else processes data</h2>
+<ul>
+  <li><strong>Resend</strong> sends sign-in links and notifications (email address and message content).</li>
+  <li><strong>Telnyx</strong> places automated appointment reminder and follow-up calls when a practice turns them on and the patient has consented (phone number, call audio and transcript).</li>
+  <li><strong>CoinPay</strong> processes practice subscription payments.</li>
+</ul>
+<p>We do not sell personal or health information, and we do not use it for advertising. We disclose information only as described here, at your direction, or when the law requires it.</p>
+
+<h2>Where it is stored and for how long</h2>
+<p>Data is stored on servers we operate in the United States. Imported records stay until you disconnect the provider or delete your account. Practice records are kept while the practice uses tleehealth and as the practice's own record-keeping obligations require. Email <a href="mailto:privacy@tleehealth.com">privacy@tleehealth.com</a> to delete your account and everything tied to it.</p>
+
+<h2>Security</h2>
+<p>All traffic uses HTTPS. Provider tokens are encrypted at rest. Records are visible only to you and to practices you share them with. A practice's staff see their practice's charts according to their role. Server-side fetches to a provider address you enter are restricted to public HTTPS endpoints, and tokens are sent only to that provider's own server.</p>
+
+<h2>Changes and contact</h2>
+<p>If we change this policy we will update the date above and, for material changes, notify account holders by email. Questions: <a href="mailto:privacy@tleehealth.com">privacy@tleehealth.com</a>.</p>
+</main></body>
+</html>
