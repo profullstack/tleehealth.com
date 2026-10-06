@@ -39,6 +39,8 @@ describe('records units', () => {
     const avs = { resourceType: 'DocumentReference', id: '1', type: { text: 'After Visit Summary' }, date: '2026-01-02T10:00:00Z' };
     expect(records.classify(avs)).toEqual({ category: 'summaries', title: 'After Visit Summary', recorded_on: '2026-01-02' });
     expect(records.classify({ resourceType: 'DocumentReference', id: '2', type: { text: 'Progress Note' } }).category).toBe('notes');
+    // Epic's progress notes carry LOINC 11506-3; they are notes, not after-visit summaries.
+    expect(records.classify({ resourceType: 'DocumentReference', id: '2b', type: { coding: [{ system: 'http://loinc.org', code: '11506-3', display: 'Progress note' }] } }).category).toBe('notes');
     expect(records.classify({ resourceType: 'DiagnosticReport', id: '3', category: [{ coding: [{ code: 'RAD' }] }], code: { text: 'Chest X-ray' } }).category).toBe('imaging');
     expect(records.classify({ resourceType: 'Observation', id: '4', category: [{ coding: [{ code: 'laboratory' }] }], code: { text: 'A1c' } }).category).toBe('labs');
     expect(records.classify({ resourceType: 'Observation', id: '5', category: [{ coding: [{ code: 'vital-signs' }] }], code: { text: 'BP' } }).category).toBe('vitals');

@@ -390,7 +390,7 @@ export function humanName(r) {
 }
 
 const IMAGING = /imaging|radiology|\brad\b|x-?ray|\bct\b|mri|ultrasound|mammo|dicom|18748-4/;
-const SUMMARY = /after visit|avs|discharge|visit summary|summary of care|continuity of care|ccd|clinical summary|18842-5|34133-9|11506-3/;
+const SUMMARY = /after visit|avs|discharge|visit summary|summary of care|continuity of care|ccd|clinical summary|18842-5|34133-9/;
 
 /** Which bucket a resource goes in, a one-line title, and its date. */
 export function classify(r) {
@@ -539,7 +539,7 @@ const SEARCHES = [
   ['Procedure'],
   ['ImagingStudy'],
   ['Media'],
-  ['CarePlan'],
+  ['CarePlan', ['38717003', '734163000', 'assess-plan']],
   ['Goal'],
   ['Coverage'],
   ['ServiceRequest'],
