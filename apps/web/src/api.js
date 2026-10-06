@@ -929,16 +929,24 @@ api.post('/orgs/:org/billing/checkout', async (c) => {
   if (!paymentsEnabled()) return c.json({ error: 'payments are not switched on yet' }, 503);
   const b = await billing(me.org_id);
   if (b.monthly_cents === null) return c.json({ error: 'over 1,000 seats: contact us for pricing' }, 400);
-  const { checkoutUrl } = await createCheckout({
+  // Crypto only: Stripe banned the owner, so CoinPay's card path (which goes
+  // through Stripe) must never be offered. See memory no-stripe-banned.
+  let checkoutUrl;
+  try {
+    ({ checkoutUrl } = await createCheckout({
     user,
     amountCents: b.monthly_cents,
     description: `tleehealth: ${me.org_name}, 1 month, ${b.seats} seat${b.seats === 1 ? '' : 's'}`,
     metadata: { org_id: me.org_id, kind: 'month', seats: String(b.seats) },
     blockchain: config.coinpay.defaultChain,
-    paymentMethod: 'both',
+    paymentMethod: 'crypto',
     successUrl: `${config.siteUrl}/app/billing?paid=1`,
     cancelUrl: `${config.siteUrl}/app/billing`,
-  });
+    }));
+  } catch (err) {
+    console.error('[billing] checkout', err.message);
+    return c.json({ error: 'CoinPay could not start the payment. Try again in a minute.' }, 502);
+  }
   await audit(me.org_id, user.id, 'billing.checkout');
   return c.json({ checkout_url: checkoutUrl });
 });
