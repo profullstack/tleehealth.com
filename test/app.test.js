@@ -31,6 +31,9 @@ describe('web', () => {
     expect(home).toContain('href="/terms"');
     expect(home).toContain('href="/privacy"');
   });
+  test('the JWKS paths answer (404 with no signing key configured)', async () => {
+    for (const p of ['/.well-known/jwks.json', '/.well-known/jwks-sandbox.json']) expect([200, 404]).toContain((await get(p)).status);
+  });
   test('app assets are served', async () => {
     expect((await get('/assets/app.js')).headers.get('content-type')).toContain('javascript');
     expect((await get('/assets/app.css')).status).toBe(200);
