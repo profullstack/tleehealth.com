@@ -7,6 +7,15 @@ provider. Patient advocates (navigators) keep care plans and log their time
 against care-management programs; the monthly superbill turns those minutes into
 Medicare's PIN (G0023/G0024), CHI (G0019/G0022) and CCM (99490/99439) codes. One account can own many orgs; each org has locations, a manager and a bill.
 
+**Health-record import** (`apps/web/src/records.js`): a patient connects MyChart, or any
+SMART on FHIR patient portal, at `/portal/records` (or `tleehealth connect`). We copy
+everything that API returns, including personal information, visits, after-visit summaries,
+notes, labs, imaging, medications, conditions, allergies, immunizations, procedures and the
+attached PDFs and images. The patient can download all of it as one zip or FHIR bundle, and
+share a connection with a practice. Tokens are sealed with `HEALTH_TOKEN_KEY` (vault).
+MyChart needs `EPIC_CLIENT_ID` from an app registered at fhir.epic.com; until then only
+the demo sandbox (and servers configured with `SMART_CLIENT_ID`) can connect.
+
 **Pricing:** each org pays for every user on its team: $10/seat/month, or $199/month for
 up to 1,000 seats, whichever is lower. Patients and leads are free.
 

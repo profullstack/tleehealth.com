@@ -188,6 +188,7 @@ async function render() {
   try {
     if (path === '/signin') return renderSignin(q);
     await loadMe();
+    if (path === '/portal/records') return renderRecords(q);
     if (path.startsWith('/portal')) return renderPortal();
     if (!state.orgId) return state.me.patient_of.length && path !== '/app/new' ? go('/portal') : renderNewPractice();
     if (path === '/app/new') return renderNewPractice();
@@ -239,6 +240,7 @@ function shell(path, main) {
       ${is(ADMIN) ? navItem('/app/billing', 'Billing', o.billing.active ? '' : '<span class="count">unpaid</span>') : ''}
       ${navItem('/app/settings', 'Settings')}
       ${state.me.patient_of.length ? navItem('/portal', 'My health') : ''}
+      ${navItem('/portal/records', 'My records')}
     </nav>
   </aside>
   <main class="main" id="main">
@@ -313,7 +315,7 @@ function renderNewPractice() {
       <button class="primary" type="submit">Create practice</button>
       <p class="err"></p>
     </form>
-    ${first ? `<p class="dim small">Signed in as ${esc(state.me.user.email)}. A patient? Your practice adds you by email, and your records appear here. <button class="link" id="so">Sign out</button></p>` : '<a class="btn" href="/app">Cancel</a>'}
+    ${first ? `<p class="dim small">Signed in as ${esc(state.me.user.email)}. A patient? Your practice adds you by email, and your records appear here. Or <a href="/portal/records">import your records from MyChart</a> and other portals. <button class="link" id="so">Sign out</button></p>` : '<a class="btn" href="/app">Cancel</a>'}
   </div></div>`;
   const f = document.getElementById('np');
   f.onsubmit = async (e) => {
@@ -616,6 +618,7 @@ function personModal(type) {
 async function viewChart(id) {
   const c = await get(`/orgs/${state.orgId}/patients/${id}`);
   const p = c.patient;
+  const shared = p.user_type === 'patient' ? await get(`/orgs/${state.orgId}/patients/${id}/records`).catch(() => null) : null;
   const clin = is(CLINICIAN);
   const byTest = {};
   for (const l of c.labs) (byTest[l.test_name] ??= []).push(l);
@@ -667,6 +670,7 @@ async function viewChart(id) {
             : '<div class="empty">Write one from an appointment.</div>'
         }
       </section>
+      ${sharedRecordsCard(shared, id)}
     </div>
     <div class="narrow">
       ${p.user_type === 'patient' ? programsCard(c.programs, id) : ''}
@@ -1323,8 +1327,9 @@ async function renderPortal() {
         .join('')
     : `<section class="card"><div class="card-b"><h2>Nothing here yet</h2><p class="muted">Your practice adds you with this email address (${esc(state.me.user.email)}). Once they do, your visits, results and prescriptions show up here.</p></div></section>`;
   root.innerHTML = `<div class="portal">
-    <div class="head"><a class="brand" href="/portal" style="padding:0">${logo} tleehealth</a><div class="row">${state.me.orgs.length ? '<a class="btn sm" href="/app">Practice</a>' : ''}<button class="sm" id="signout">Sign out</button></div></div>
+    ${portalHead('/portal')}
     <h1>${name ? `Hi, ${esc(name)}` : 'Your health'}</h1>
+    <section class="card"><div class="card-b row" style="justify-content:space-between"><span><b>Records from other providers</b><div class="dim small">Bring in visits, after-visit summaries, labs, imaging and notes from MyChart and other patient portals.</div></span><a class="btn sm" href="/portal/records">Health records</a></div></section>
     ${body}</div>`;
   document.getElementById('signout').onclick = signOut;
   root.querySelectorAll('[data-pa]').forEach(
@@ -1337,6 +1342,167 @@ async function renderPortal() {
     (b) => (b.onclick = () => act(() => post('/portal/calls', { org_id: b.dataset.calls, calls_ok: b.dataset.on === 'yes' }), b.dataset.on === 'yes' ? 'Reminder calls on' : 'Reminder calls off')),
   );
   root.querySelectorAll('[data-refill-me]').forEach((b) => (b.onclick = () => act(() => post('/portal/refills', { medication_id: b.dataset.refillMe }), 'Refill requested')));
+}
+
+function portalHead(path) {
+  const link = (href, label) => `<a class="btn sm ${path === href ? 'primary' : ''}" href="${href}">${label}</a>`;
+  return `<div class="head"><a class="brand" href="/portal" style="padding:0">${logo} tleehealth</a><div class="row">
+    ${link('/portal', 'Visits')}${link('/portal/records', 'Health records')}
+    ${state.me.orgs.length ? '<a class="btn sm" href="/app">Practice</a>' : ''}<button class="sm" id="signout">Sign out</button></div></div>`;
+}
+
+/* -------------------------------------------------------- health records -- */
+// Records imported from other providers (MyChart and any SMART on FHIR portal).
+
+const CONN_BADGE = { active: 'b-ok', syncing: 'b-info', error: 'b-alert', expired: 'b-warn', revoked: '' };
+const fmtSize = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
+let recordsPoll = null;
+
+function profileCard(p, title = 'Personal information') {
+  if (!p) return '';
+  const rows = [
+    ['Name', p.name], ['Born', p.birth_date], ['Sex', p.sex], ['Language', p.language], ['Marital status', p.marital_status],
+    ...p.phones.map((v) => ['Phone', v]), ...p.emails.map((v) => ['Email', v]), ...p.addresses.map((v) => ['Address', v]),
+    ...p.identifiers.map((i) => [i.type, i.value]),
+    ...p.contacts.map((c) => ['Contact', [c.name, c.relationship, c.phone].filter(Boolean).join(', ')]),
+    ...p.general_practitioner.map((g) => ['Primary care', g]),
+  ].filter(([, v]) => v);
+  return `<section class="card"><div class="card-h"><h2>${title}</h2></div><ul class="list">${rows
+    .map(([k, v]) => `<li><span class="dim small">${esc(k)}</span><span class="mono small" style="text-align:right">${esc(v)}</span></li>`)
+    .join('')}</ul></section>`;
+}
+
+/** A list of imported records; fileHref turns a file id into a link. */
+function recordsList(items, fileHref) {
+  if (!items.length) return '<div class="empty">Nothing in this category.</div>';
+  return `<ul class="list">${items
+    .map(
+      (i) => `<li><span><span>${esc(i.title ?? i.resource_type)}</span><div class="sub">${esc(dot(i.recorded_on && String(i.recorded_on).slice(0, 10), i.detail, i.provider_name))}</div>
+        ${i.files.length ? `<div class="row" style="gap:6px;margin-top:4px">${i.files.map((f) => `<a class="btn sm" target="_blank" rel="noopener" href="${fileHref(f.id)}">${esc(f.title || f.content_type || 'file')} · ${fmtSize(f.size)}</a>`).join('')}</div>` : ''}</span>
+        ${i.id && fileHref.own ? `<button class="sm" data-rec="${i.id}">Details</button>` : ''}</li>`,
+    )
+    .join('')}</ul>`;
+}
+
+async function renderRecords(q) {
+  clearTimeout(recordsPoll);
+  const data = await get('/records');
+  const category = q.get('category');
+  const items = category ? (await get(`/records/items?category=${encodeURIComponent(category)}&limit=500`)).items : null;
+  const syncing = data.connections.some((c) => c.status === 'syncing');
+  const ownFile = Object.assign((id) => `/api/v1/records/files/${id}?inline=1`, { own: true });
+
+  const connections = data.connections.length
+    ? `<ul class="list">${data.connections
+        .map(
+          (c) => `<li style="flex-direction:column;align-items:stretch"><div class="row" style="justify-content:space-between">
+          <span><b>${esc(c.provider_name)}</b> <span class="badge ${CONN_BADGE[c.status] ?? ''}">${c.status === 'syncing' ? 'importing…' : esc(c.status)}</span>
+            <div class="sub">${c.records} records · ${c.files} files${c.last_synced_at ? ` · imported ${fmtDate(c.last_synced_at)} ${fmtTime(c.last_synced_at)}` : ''}</div></span>
+          <span class="row" style="gap:6px">
+            ${['active', 'error'].includes(c.status) ? `<button class="sm" data-sync="${c.id}">Import again</button>` : ''}
+            ${['expired', 'error', 'revoked'].includes(c.status) ? `<button class="sm primary" data-reconnect="${esc(c.fhir_base)}" data-name="${esc(c.provider_name)}">Reconnect</button>` : ''}
+            <a class="btn sm" href="/api/v1/records/export?connection=${c.id}">Download</a>
+            <button class="sm danger" data-disconnect="${c.id}" data-name="${esc(c.provider_name)}">Disconnect</button></span></div>
+          ${c.last_error ? `<details class="small dim"><summary>${c.status === 'active' ? 'Some parts could not be read' : 'What went wrong'}</summary><pre style="white-space:pre-wrap">${esc(c.last_error)}</pre></details>` : ''}
+          ${data.practices.length ? `<div class="row small" style="gap:14px">${data.practices
+            .map((p) => {
+              const on = c.shared_with.some((s) => s.org_id === p.org_id);
+              return `<label class="row" style="gap:6px"><input type="checkbox" style="width:auto;margin:0" data-share="${c.id}" data-org="${p.org_id}" ${on ? 'checked' : ''}> Share with ${esc(p.org_name)}</label>`;
+            })
+            .join('')}</div>` : ''}</li>`,
+        )
+        .join('')}</ul>`
+    : '<div class="empty">Nothing connected yet. Find your provider below: you sign in on their site, and everything they keep about you is copied here.</div>';
+
+  root.innerHTML = `<div class="portal">
+    ${portalHead('/portal/records')}
+    <h1>Your health records</h1>
+    ${q.get('error') ? `<section class="card"><div class="card-b"><span class="badge b-alert">not connected</span> ${esc(q.get('error'))}</div></section>` : ''}
+    <section class="card"><div class="card-h"><h2>Connected providers</h2>${data.total ? `<span class="row" style="gap:6px"><a class="btn sm primary" href="/api/v1/records/export">Download everything</a><a class="btn sm" href="/api/v1/records/export?format=bundle" title="One HL7 FHIR file other health apps can import">FHIR</a></span>` : ''}</div>${connections}</section>
+    <section class="card"><div class="card-h"><h2>Connect a provider</h2></div><div class="card-b stack">
+      <input id="prov-q" placeholder="Search: your hospital or clinic (MyChart)" autocomplete="off" aria-label="Search providers">
+      <ul class="list" id="prov-list" style="padding:0"></ul>
+      <details><summary class="small">Not listed? Connect any patient portal by its FHIR address</summary>
+        <form id="fhir-form" class="stack" style="margin-top:10px">
+          <label class="f">FHIR address<input name="fhir_base" required placeholder="https://fhir.example.org/api/FHIR/R4"></label>
+          <label class="f">Name<input name="name" placeholder="Example Health"></label>
+          <button type="submit">Connect</button><p class="err"></p></form></details>
+      <p class="dim small">You sign in on your provider's own site and choose what to share; we never see your password. We copy your personal information, visits, after-visit summaries, notes, lab results, imaging, medications, conditions, allergies, immunizations, procedures and the files attached to them. Disconnecting deletes all of it here.</p>
+    </div></section>
+    ${data.total ? `${profileCard(data.profile)}
+    <section class="card"><div class="card-h"><h2>${category ? esc(data.categories.find((c) => c.key === category)?.label ?? category) : `${data.total} records · ${data.files} files`}</h2>${category ? '<a class="btn sm" href="/portal/records">All categories</a>' : ''}</div>
+      ${category ? recordsList(items, ownFile) : `<ul class="list">${data.categories.map((c) => `<li><a href="/portal/records?category=${c.key}">${esc(c.label)}</a><span class="badge">${c.count}</span></li>`).join('')}</ul>`}
+    </section>` : ''}
+  </div>`;
+
+  document.getElementById('signout').onclick = signOut;
+  if (q.get('connected')) {
+    toast(syncing ? 'Connected. Importing your records…' : 'Connected. Your records are in.');
+    history.replaceState({}, '', '/portal/records');
+  }
+  if (syncing) recordsPoll = setTimeout(() => location.pathname === '/portal/records' && render(), 3000);
+
+  const startConnect = async (payload) => {
+    const r = await post('/records/connect', payload);
+    location.href = r.authorize_url;
+  };
+  const list = document.getElementById('prov-list');
+  const search = async (term) => {
+    const { providers } = await get(`/records/providers?q=${encodeURIComponent(term)}`);
+    list.innerHTML = providers.length
+      ? providers
+          .slice(0, 12)
+          .map((p) => `<li><span>${esc(p.name)}<div class="sub">${p.vendor === 'epic' ? 'MyChart' : p.vendor === 'sandbox' ? 'try it with a made-up patient' : ''}</div></span>${p.ready ? `<button class="sm primary" data-connect="${esc(p.id)}">Connect</button>` : '<span class="badge">coming soon</span>'}</li>`)
+          .join('')
+      : '<li class="dim small">No match. Try one word of the name, or use its FHIR address below.</li>';
+    list.querySelectorAll('[data-connect]').forEach((b) => (b.onclick = () => startConnect({ provider_id: b.dataset.connect }).catch((err) => toast(err.message, true))));
+  };
+  let t;
+  const qi = document.getElementById('prov-q');
+  qi.oninput = () => {
+    clearTimeout(t);
+    t = setTimeout(() => search(qi.value.trim()).catch((err) => toast(err.message, true)), 250);
+  };
+  search('').catch(() => {});
+  const ff = document.getElementById('fhir-form');
+  ff.onsubmit = (e) => {
+    e.preventDefault();
+    startConnect(formData(ff)).catch((err) => (ff.querySelector('.err').textContent = err.message));
+  };
+  root.querySelectorAll('[data-sync]').forEach((b) => (b.onclick = () => act(() => post(`/records/connections/${b.dataset.sync}/sync`), 'Importing…')));
+  root.querySelectorAll('[data-reconnect]').forEach((b) => (b.onclick = () => startConnect({ fhir_base: b.dataset.reconnect, name: b.dataset.name }).catch((err) => toast(err.message, true))));
+  root.querySelectorAll('[data-disconnect]').forEach(
+    (b) =>
+      (b.onclick = () =>
+        confirm(`Disconnect ${b.dataset.name}? Everything imported from it is deleted here (your provider keeps its own copy).`) &&
+        act(() => api('DELETE', `/records/connections/${b.dataset.disconnect}`), 'Disconnected')),
+  );
+  root.querySelectorAll('[data-share]').forEach(
+    (b) => (b.onchange = () => act(() => api('PUT', `/records/connections/${b.dataset.share}/share`, { org_id: b.dataset.org, shared: b.checked }), b.checked ? 'Shared' : 'No longer shared')),
+  );
+  root.querySelectorAll('[data-rec]').forEach(
+    (b) =>
+      (b.onclick = async () => {
+        try {
+          const { item } = await get(`/records/items/${b.dataset.rec}`);
+          openModal(item.title ?? item.resource_type, `<div class="dim small">${esc(dot(item.provider_name, item.resource_type, item.recorded_on && String(item.recorded_on).slice(0, 10)))}</div><pre class="small" style="white-space:pre-wrap;max-height:60vh;overflow:auto">${esc(JSON.stringify(item.resource, null, 2))}</pre>`);
+        } catch (err) {
+          toast(err.message, true);
+        }
+      }),
+  );
+}
+
+/** On a patient's chart: what they shared from other providers. */
+function sharedRecordsCard(r, patientId) {
+  if (!r) return '';
+  const fileHref = (id) => `/api/v1/orgs/${state.orgId}/patients/${patientId}/records/files/${id}?inline=1`;
+  return `<section class="card"><div class="card-h"><h2>Records from other providers</h2>${r.total && is(CLINICIAN) ? `<a class="btn sm" href="/api/v1/orgs/${state.orgId}/patients/${patientId}/records/export">Download all</a>` : ''}</div>
+    ${
+      r.total
+        ? `<div class="card-b dim small">${r.connections.map((c) => esc(c.provider_name)).join(', ')} · ${r.categories.map((c) => `${esc(c.label)} ${c.count}`).join(' · ')}</div>${recordsList(r.items.filter((i) => i.category !== 'profile').slice(0, 25), fileHref)}`
+        : '<div class="empty">Nothing shared. The patient can connect MyChart or another portal under Health records in their portal and share it with this practice.</div>'
+    }</section>`;
 }
 
 render();

@@ -37,7 +37,7 @@ describe('cli', () => {
 describe('mcp', () => {
   test('lists tools', async () => {
     const { tools } = await handle({ method: 'tools/list' });
-    expect(tools.map((t) => t.name)).toEqual(['get_schedule', 'get_caseload', 'get_superbill', 'log_navigation_time', 'api_health']);
+    expect(tools.map((t) => t.name)).toEqual(['get_schedule', 'get_caseload', 'get_superbill', 'log_navigation_time', 'get_dashboard', 'get_health_records', 'list_health_records', 'get_health_record', 'find_health_providers', 'connect_health_provider', 'sync_health_records', 'api_health']);
   });
   test('initialize', async () => {
     expect((await handle({ method: 'initialize' })).serverInfo.name).toBe('tleehealth');

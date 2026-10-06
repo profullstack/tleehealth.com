@@ -7,6 +7,7 @@ import { config, monthlyCents } from './config.js';
 import { sendAddedToOrg, sendLoginLink } from './mail.js';
 import * as calls from './calls.js';
 import * as nav from './navigation.js';
+import * as records from './records.js';
 
 /**
  * /api/v1: the only thing any client talks to. The browser app, the CLI, the TUI
@@ -33,7 +34,7 @@ const fail = (status, message) => {
 };
 
 api.onError((err, c) => {
-  if (err instanceof HttpError) return c.json({ error: err.message }, err.status);
+  if (err instanceof HttpError || err instanceof records.RecordsError) return c.json({ error: err.message }, err.status);
   if (err?.code === '23505') return c.json({ error: 'that already exists' }, 409);
   if (err?.code === '22P02' || err?.code === '22007' || err?.code === '22008') return c.json({ error: 'invalid value' }, 400);
   if (err?.code === '23514') return c.json({ error: 'a value is out of range' }, 400);
@@ -1045,6 +1046,158 @@ api.get('/schedule', async (c) => {
       status: a.status.replace('_', ' '),
     })),
   });
+});
+
+/* --------------------------------------------------------- health records -- */
+// A patient's imported records from other providers (MyChart and any SMART on
+// FHIR portal). They belong to the account; a practice sees a connection only
+// once the patient shares it.
+
+const recordsScope = (c) => {
+  const id = c.req.query('connection');
+  return id ? { connectionId: uuid(id, 'connection') } : {};
+};
+const CATEGORY_KEYS = records.CATEGORIES.map(([k]) => k);
+const categoryParam = (v) => {
+  if (!v) return null;
+  if (!CATEGORY_KEYS.includes(v)) fail(400, `category is one of ${CATEGORY_KEYS.join(', ')}`);
+  return v;
+};
+const download = (c, f) =>
+  c.body(new Uint8Array(f.data), 200, {
+    'content-type': f.content_type || 'application/octet-stream',
+    'content-disposition': `${c.req.query('inline') ? 'inline' : 'attachment'}; filename="${String(f.title || 'file').replace(/[^\w .-]+/g, '_').slice(0, 80)}"`,
+    'content-security-policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+    'cache-control': 'private, no-store',
+  });
+
+api.get('/records/providers', async (c) => {
+  await requireUser(c);
+  return c.json({ providers: await records.searchProviders(c.req.query('q') ?? '') });
+});
+
+api.get('/records', async (c) => {
+  const user = await requireUser(c);
+  const [connections, summary, practices] = await Promise.all([
+    records.connections(user.id),
+    records.overview(user.id, recordsScope(c)),
+    myPatientRows(user),
+  ]);
+  return c.json({ connections, ...summary, practices: practices.map((p) => ({ org_id: p.org_id, org_name: p.org_name })) });
+});
+
+api.get('/records/items', async (c) => {
+  const user = await requireUser(c);
+  const q = c.req.query();
+  return c.json({ items: await records.items(user.id, { category: categoryParam(q.category), q: str(q.q, 100), limit: q.limit, offset: q.offset, ...recordsScope(c) }) });
+});
+
+api.get('/records/items/:id', async (c) => {
+  const user = await requireUser(c);
+  return c.json({ item: await records.item(user.id, uuid(c.req.param('id'))) });
+});
+
+api.get('/records/files/:id', async (c) => {
+  const user = await requireUser(c);
+  return download(c, await records.file(user.id, uuid(c.req.param('id'))));
+});
+
+api.post('/records/connect', async (c) => {
+  const user = await requireUser(c);
+  const b = await body(c);
+  const r = await records.start(user, { provider_id: str(b.provider_id, 200), fhir_base: str(b.fhir_base, 500), name: str(b.name, 200), return_to: b.return_to });
+  return c.json({ connection_id: r.connection.id, provider_name: r.connection.provider_name, authorize_url: r.authorize_url }, 201);
+});
+
+api.get('/records/connections/:id', async (c) => {
+  const user = await requireUser(c);
+  const conn = await records.connectionFor(user.id, uuid(c.req.param('id'), 'connection'));
+  const [row] = (await records.connections(user.id)).filter((x) => x.id === conn.id);
+  return c.json({ connection: row ?? { id: conn.id, provider_name: conn.provider_name, status: conn.status, last_error: conn.last_error } });
+});
+
+api.post('/records/connections/:id/sync', async (c) => {
+  const user = await requireUser(c);
+  const conn = await records.connectionFor(user.id, uuid(c.req.param('id'), 'connection'));
+  if (['pending', 'expired', 'revoked'].includes(conn.status)) fail(409, `${conn.provider_name}: reconnect first`);
+  if (c.req.query('wait')) return c.json(await records.sync(conn.id));
+  records.syncInBackground(conn.id);
+  return c.json({ ok: true, started: true }, 202);
+});
+
+// Disconnecting deletes the tokens AND everything imported through them.
+api.delete('/records/connections/:id', async (c) => {
+  const user = await requireUser(c);
+  const conn = await records.connectionFor(user.id, uuid(c.req.param('id'), 'connection'));
+  await db()`delete from health_connections where id = ${conn.id}`;
+  return c.json({ ok: true });
+});
+
+api.put('/records/connections/:id/share', async (c) => {
+  const user = await requireUser(c);
+  const conn = await records.connectionFor(user.id, uuid(c.req.param('id'), 'connection'));
+  const { org_id, shared } = await body(c);
+  uuid(org_id, 'org');
+  const [p] = (await myPatientRows(user)).filter((x) => x.org_id === org_id);
+  if (!p) fail(404, 'you are not a patient of that practice');
+  if (shared) {
+    await db()`insert into health_connection_shares (connection_id, org_id, patient_id) values (${conn.id}, ${org_id}, ${p.id})
+               on conflict (connection_id, org_id) do update set patient_id = excluded.patient_id`;
+  } else {
+    await db()`delete from health_connection_shares where connection_id = ${conn.id} and org_id = ${org_id}`;
+  }
+  await audit(org_id, user.id, shared ? 'records.share' : 'records.unshare', p.id);
+  return c.json({ ok: true, shared: Boolean(shared) });
+});
+
+api.get('/records/export', async (c) => {
+  const user = await requireUser(c);
+  const scope = recordsScope(c);
+  if (c.req.query('format') === 'bundle') {
+    const bundle = await records.exportBundle(user.id, scope);
+    return c.body(JSON.stringify(bundle), 200, {
+      'content-type': 'application/fhir+json',
+      'content-disposition': `attachment; filename="tleehealth-records-${new Date().toISOString().slice(0, 10)}.json"`,
+    });
+  }
+  const z = await records.exportZip(user.id, scope);
+  return c.body(z.bytes, 200, {
+    'content-type': 'application/zip',
+    'content-disposition': `attachment; filename="${z.filename}"`,
+    'x-records': String(z.records),
+    'x-files': String(z.files),
+  });
+});
+
+// The team's view: only connections this patient shared with this practice.
+api.get('/orgs/:org/patients/:id/records', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  const p = await personIn(me.org_id, c.req.param('id'), ['patient'], 'patient');
+  const scope = { orgId: me.org_id, patientId: p.id };
+  const [summary, list, shared] = await Promise.all([
+    records.overview(null, scope),
+    records.items(null, { ...scope, category: categoryParam(c.req.query('category')), limit: c.req.query('limit') ?? 200 }),
+    db()`select c.provider_name, c.last_synced_at, s.shared_at from health_connection_shares s
+         join health_connections c on c.id = s.connection_id where s.org_id = ${me.org_id} and s.patient_id = ${p.id}`,
+  ]);
+  await audit(me.org_id, user.id, 'records.read', p.id);
+  return c.json({ connections: shared, ...summary, items: list });
+});
+
+api.get('/orgs/:org/patients/:id/records/export', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'), CLINICIAN);
+  const p = await personIn(me.org_id, c.req.param('id'), ['patient'], 'patient');
+  const z = await records.exportZip(null, { orgId: me.org_id, patientId: p.id });
+  await audit(me.org_id, user.id, 'records.export', p.id);
+  return c.body(z.bytes, 200, { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${z.filename}"` });
+});
+
+api.get('/orgs/:org/patients/:pid/records/files/:id', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'));
+  const p = await personIn(me.org_id, c.req.param('pid'), ['patient'], 'patient');
+  const f = await records.file(null, uuid(c.req.param('id')), { orgId: me.org_id, patientId: p.id });
+  await audit(me.org_id, user.id, 'records.file', p.id);
+  return download(c, f);
 });
 
 /* ---------------------------------------------------------------- portal -- */
