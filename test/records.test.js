@@ -58,6 +58,24 @@ describe('records units', () => {
     expect(records.clientFor('sandbox').id).toBe('tleehealth');
   });
 
+  test('JWT client auth: public JWKS and a verifiable RS384 assertion', async () => {
+    const { generateKeyPairSync, createPublicKey, verify } = await import('node:crypto');
+    expect(records.jwks()).toBeNull();
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    process.env.CLIENT_JWT_PRIVATE_KEY = privateKey.export({ type: 'pkcs8', format: 'pem' }).replace(/\n/g, '\\n');
+    const set = records.jwks();
+    expect(set.keys[0]).toMatchObject({ kty: 'RSA', alg: 'RS384', use: 'sig', kid: 'tleehealth-1' });
+    expect(set.keys[0].d).toBeUndefined(); // public half only
+    const jwt = records.clientAssertion('client-1', 'https://fhir.example.org/oauth2/token');
+    const [h, c, sig] = jwt.split('.');
+    const claims = JSON.parse(Buffer.from(c, 'base64url').toString());
+    expect(claims).toMatchObject({ iss: 'client-1', sub: 'client-1', aud: 'https://fhir.example.org/oauth2/token' });
+    expect(claims.exp - claims.iat).toBeLessThanOrEqual(300);
+    const pub = createPublicKey({ key: set.keys[0], format: 'jwk' });
+    expect(verify('sha384', Buffer.from(`${h}.${c}`), pub, Buffer.from(sig, 'base64url'))).toBe(true);
+    delete process.env.CLIENT_JWT_PRIVATE_KEY;
+  });
+
   test('profileOf flattens demographics and identifiers', () => {
     const p = records.profileOf({
       resourceType: 'Patient',

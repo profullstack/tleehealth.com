@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, randomBytes, randomUUID, sign } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { db } from '@tleehealth/db';
@@ -272,11 +272,52 @@ export async function start(user, { provider_id, fhir_base, name, return_to } = 
   return { connection: conn, authorize_url: u.toString() };
 }
 
+/* --------------------------------------------- JWT client authentication -- */
+// Epic's preferred confidential-client auth: we sign a short-lived assertion
+// with our private key (vault CLIENT_JWT_PRIVATE_KEY, PEM) and Epic checks it
+// against the public half at /.well-known/jwks.json. No secret is shared.
+
+const JWT_KID = 'tleehealth-1';
+let jwtKey = null;
+function privateKey() {
+  const pem = process.env.CLIENT_JWT_PRIVATE_KEY;
+  if (!pem) return null;
+  if (!jwtKey || jwtKey.pem !== pem) jwtKey = { pem, key: createPrivateKey(pem.replace(/\\n/g, '\n')) };
+  return jwtKey.key;
+}
+
+/** The public key set Epic fetches to verify our assertions; null without a key. */
+export function jwks() {
+  const key = privateKey();
+  if (!key) return null;
+  const jwk = createPublicKey(key).export({ format: 'jwk' });
+  return { keys: [{ ...jwk, kid: JWT_KID, alg: 'RS384', use: 'sig' }] };
+}
+
+/** A private_key_jwt client assertion for one token request (RFC 7523). */
+export function clientAssertion(clientId, tokenEndpoint, now = Date.now()) {
+  const key = privateKey();
+  if (!key) return null;
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const head = b64({ alg: 'RS384', typ: 'JWT', kid: JWT_KID });
+  const iat = Math.floor(now / 1000);
+  const claims = b64({ iss: clientId, sub: clientId, aud: tokenEndpoint, jti: randomUUID(), iat, nbf: iat, exp: iat + 240 });
+  const sig = sign('sha384', Buffer.from(`${head}.${claims}`), key).toString('base64url');
+  return `${head}.${claims}.${sig}`;
+}
+
+// Vendors whose registration uses our JWK set (Epic app 61862, both clients).
+const JWT_VENDORS = ['epic', 'epic-sandbox'];
+
 async function tokenRequest(conn, form) {
   const client = clientFor(conn.vendor) ?? { id: conn.client_id, secret: '' };
   const headers = { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' };
   const body = new URLSearchParams(form);
-  if (client.secret) headers.authorization = `Basic ${Buffer.from(`${encodeURIComponent(client.id)}:${encodeURIComponent(client.secret)}`).toString('base64')}`;
+  const assertion = JWT_VENDORS.includes(conn.vendor) ? clientAssertion(client.id, conn.token_endpoint) : null;
+  if (assertion) {
+    body.set('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+    body.set('client_assertion', assertion);
+  } else if (client.secret) headers.authorization = `Basic ${Buffer.from(`${encodeURIComponent(client.id)}:${encodeURIComponent(client.secret)}`).toString('base64')}`;
   else body.set('client_id', client.id);
   const res = await timedFetch(conn.token_endpoint, { method: 'POST', headers, body });
   const tok = await res.json().catch(() => ({}));
