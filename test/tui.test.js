@@ -1,8 +1,7 @@
 // The dashboard drawn off-screen: every tab renders from plain state.
 import { describe, expect, test } from 'bun:test';
-import { renderToText } from '@profullstack/hqtui/testing';
 import { formatItems, formatRecords } from '../packages/cli/src/cli.js';
-import { initialState, rowCount, view } from '../packages/cli/src/tui.js';
+import { initialState, renderText, rowCount } from '../packages/cli/src/tui.js';
 
 const RECORDS = {
   connections: [{ id: 'c1', provider_name: 'Lin Clinic MyChart', status: 'active', records: 14, files: 4, last_synced_at: '2026-10-06T12:00:00Z', shared_with: [] }],
@@ -28,11 +27,11 @@ function state(tab) {
   return s;
 }
 
-const draw = (s) => renderToText(view(s), { width: 140, height: 30 });
+const draw = (s) => renderText(s, { width: 140, height: 30 });
 
 describe('dashboard', () => {
-  test('Today: appointments, AI call state, and what is waiting', () => {
-    const out = draw(state(0));
+  test('Today: appointments, AI call state, and what is waiting', async () => {
+    const out = await draw(state(0));
     expect(out).toContain('1 Today');
     expect(out).toContain('Rosa Diaz');
     expect(out).toContain('reminder completed');
@@ -40,40 +39,40 @@ describe('dashboard', () => {
     expect(out).toContain('Your records');
   });
 
-  test('Needs: flagged calls and refills in one list', () => {
-    const out = draw(state(1));
+  test('Needs: flagged calls and refills in one list', async () => {
+    const out = await draw(state(1));
     expect(out).toContain('chest pain mentioned');
     expect(out).toContain('Metformin 500 mg');
     expect(rowCount(state(1))).toBe(2);
   });
 
-  test('Caseload: minutes and codes', () => {
-    const out = draw(state(2));
+  test('Caseload: minutes and codes', async () => {
+    const out = await draw(state(2));
     expect(out).toContain('G0023');
     expect(out).toContain('15 min');
   });
 
-  test('Records: providers, categories, personal information', () => {
-    const out = draw(state(3));
+  test('Records: providers, categories, personal information', async () => {
+    const out = await draw(state(3));
     expect(out).toContain('Lin Clinic MyChart');
     expect(out).toContain('After-visit summaries');
     expect(out).toContain('E12345');
     expect(out).toContain('export all');
   });
 
-  test('Records: an open category lists its records', () => {
+  test('Records: an open category lists its records', async () => {
     const s = state(3);
     s.category = 'labs';
     s.items = [{ id: 'i1', title: 'A1c', recorded_on: '2026-09-01', detail: '6.1 %', files: [], resource_type: 'Observation' }];
-    const out = draw(s);
+    const out = await draw(s);
     expect(out).toContain('Lab results · Esc back');
     expect(out).toContain('6.1 %');
   });
 
-  test('a patient with no practice still gets Records', () => {
+  test('a patient with no practice still gets Records', async () => {
     const s = state(0);
     s.me.orgs = [];
-    expect(draw(s)).toContain('not on a practice team');
+    expect(await draw(s)).toContain('not on a practice team');
   });
 });
 

@@ -239,6 +239,12 @@ export function view(s) {
   };
 }
 
+/** The screen as plain text, without a terminal: for tests and snapshots. */
+export async function renderText(s, options = { width: 120, height: 30 }) {
+  const { renderToText } = await import('@profullstack/hqtui/testing');
+  return renderToText(view(s), options);
+}
+
 export async function runTui(auth, { date, org } = {}) {
   const s = initialState(date);
   const app = await createApp({ fps: 20, quitKeys: [] });
