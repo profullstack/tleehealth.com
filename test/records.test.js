@@ -48,6 +48,13 @@ describe('records units', () => {
     expect(records.vendorOf('https://fhir.example.org/api/FHIR/R4')).toBe('epic');
     expect(records.vendorOf('https://fhir-myrecord.cerner.com/r4/abc')).toBe('cerner');
     expect(records.vendorOf(records.SANDBOX_BASE)).toBe('sandbox');
+    expect(records.vendorOf('https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4')).toBe('epic-sandbox');
+    process.env.EPIC_SANDBOX_CLIENT_ID = 'nonprod-id';
+    process.env.EPIC_CLIENT_ID = 'prod-id';
+    expect(records.clientFor('epic-sandbox').id).toBe('nonprod-id');
+    expect(records.clientFor('epic').id).toBe('prod-id');
+    delete process.env.EPIC_SANDBOX_CLIENT_ID;
+    delete process.env.EPIC_CLIENT_ID;
     expect(records.clientFor('sandbox').id).toBe('tleehealth');
   });
 

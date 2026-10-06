@@ -150,8 +150,8 @@ async function epicDirectory() {
 
 function builtIns() {
   const list = [{ id: 'sandbox', name: 'Demo patient (SMART Health IT sandbox)', vendor: 'sandbox', fhir_base: SANDBOX_BASE }];
-  if (process.env.EPIC_CLIENT_ID)
-    list.push({ id: 'epic-sandbox', name: 'Epic sandbox (MyChart test patients)', vendor: 'epic', fhir_base: 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4' });
+  if (process.env.EPIC_SANDBOX_CLIENT_ID)
+    list.push({ id: 'epic-sandbox', name: 'Epic sandbox (MyChart test patients)', vendor: 'epic-sandbox', fhir_base: EPIC_SANDBOX_BASE });
   return list;
 }
 
@@ -167,8 +167,12 @@ async function providerById(id) {
   return [...builtIns(), ...(id.startsWith('epic:') ? await epicDirectory() : [])].find((p) => p.id === id) ?? null;
 }
 
+const EPIC_SANDBOX_BASE = 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4';
+
 export function vendorOf(fhirBase) {
   if (fhirBase === SANDBOX_BASE || /launch\.smarthealthit\.org/.test(fhirBase)) return 'sandbox';
+  // Epic's own test server takes the app's non-production client id.
+  if (/^https:\/\/fhir\.epic\.com\/interconnect-fhir-oauth\//i.test(fhirBase)) return 'epic-sandbox';
   if (/\/api\/FHIR\/R4/i.test(fhirBase)) return 'epic';
   if (/cerner\.com/i.test(fhirBase)) return 'cerner';
   return 'smart';
@@ -176,13 +180,14 @@ export function vendorOf(fhirBase) {
 
 /**
  * The app registration to sign in with. MyChart needs our Epic client id
- * (fhir.epic.com), Oracle Health a Cerner one; any other SMART server takes
- * SMART_CLIENT_ID. The sandbox accepts any id.
+ * (fhir.epic.com app 61862: EPIC_CLIENT_ID for real organizations,
+ * EPIC_SANDBOX_CLIENT_ID for Epic's test server), Oracle Health a Cerner one;
+ * any other SMART server takes SMART_CLIENT_ID. The SMART sandbox accepts any id.
  */
 export function clientFor(vendor) {
   const env = (k) => process.env[k] || '';
   if (vendor === 'sandbox') return { id: 'tleehealth', secret: '' };
-  const prefix = { epic: 'EPIC', cerner: 'CERNER' }[vendor] ?? 'SMART';
+  const prefix = { epic: 'EPIC', 'epic-sandbox': 'EPIC_SANDBOX', cerner: 'CERNER' }[vendor] ?? 'SMART';
   const id = env(`${prefix}_CLIENT_ID`);
   return id ? { id, secret: env(`${prefix}_CLIENT_SECRET`) } : null;
 }

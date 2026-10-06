@@ -1427,7 +1427,7 @@ async function renderRecords(q) {
           <label class="f">FHIR address<input name="fhir_base" required placeholder="https://fhir.example.org/api/FHIR/R4"></label>
           <label class="f">Name<input name="name" placeholder="Example Health"></label>
           <button type="submit">Connect</button><p class="err"></p></form></details>
-      <p class="dim small">You sign in on your provider's own site and choose what to share; we never see your password. We copy your personal information, visits, after-visit summaries, notes, lab results, imaging, medications, conditions, allergies, immunizations, procedures and the files attached to them. Disconnecting deletes all of it here.</p>
+      <p class="dim small">You sign in on your provider's own site and choose what to share; we never see your password. We copy your personal information, visits, after-visit summaries, notes, lab results, imaging, medications, conditions, allergies, immunizations, procedures and the files attached to them. Disconnecting deletes all of it here. <a href="/privacy">Privacy policy</a>.</p>
     </div></section>
     ${data.total ? `${profileCard(data.profile)}
     <section class="card"><div class="card-h"><h2>${category ? esc(data.categories.find((c) => c.key === category)?.label ?? category) : `${data.total} records · ${data.files} files`}</h2>${category ? '<a class="btn sm" href="/portal/records">All categories</a>' : ''}</div>

@@ -138,6 +138,8 @@ app.get('/icon.svg', (c) =>
 );
 app.get('/favicon.ico', (c) => c.redirect('/icon.svg', 301));
 app.get('/install.sh', (c) => c.body(INSTALL_SH, 200, { 'content-type': 'text/x-shellscript' }));
+app.get('/terms', (c) => c.html(pub('terms.html').toString()));
+app.get('/privacy', (c) => c.html(pub('privacy.html').toString()));
 app.get('/robots.txt', (c) => c.text('User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /portal\n'));
 app.get('/llms.txt', (c) =>
   c.text(`# tleehealth
