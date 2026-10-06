@@ -846,7 +846,7 @@ async function viewBilling(q) {
           <dt>Paid through</dt><dd>${b.paid_through ? fmtDate(b.paid_through) : '—'}</dd>
           <dt>Free trial</dt><dd>${new Date(b.trial_ends) > new Date() ? `ends ${fmtDate(b.trial_ends)}` : 'ended'}</dd>
         </dl>
-        ${b.payments_enabled ? `<div><button class="primary" id="pay">Pay ${money(b.monthly_cents)} for one month</button></div><p class="dim small">Card or crypto through CoinPay. Each payment adds one month.</p>` : '<p class="muted">Online payment is not switched on yet. Your practice keeps working; we will email the owner before it is needed.</p>'}
+        ${b.payments_enabled ? `<div><button class="primary" id="pay">Pay ${money(b.monthly_cents)} for one month</button></div><p class="dim small">Paid in crypto (USDC and other coins) through CoinPay. Each payment adds one month.</p>` : '<p class="muted">Online payment is not switched on yet. Your practice keeps working; we will email the owner before it is needed.</p>'}
       </div></section>
     <section class="card narrow"><div class="card-h"><h2>Payments</h2></div>
       ${payments.length ? `<ul class="list">${payments.map((p) => `<li><span>${money(p.amount_cents)}<div class="sub">${fmtDate(p.created_at)}</div></span><span class="badge">${esc(p.status)}</span></li>`).join('')}</ul>` : '<div class="empty">No payments yet.</div>'}
