@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ping } from '@tleehealth/db';
+import { footerHtml } from '@profullstack/footer';
 import { Hono } from 'hono';
 import { api, coinpayWebhook } from './api.js';
 import * as auth from './auth.js';
@@ -25,7 +26,19 @@ app.use('*', async (c, next) => {
 });
 
 // The landing page is built from the design canvas (design/Main.dc.html).
-app.get('/', (c) => c.html(pub('index.html').toString()));
+// The footer is @profullstack/footer, rendered on the server so the ring's verifier
+// sees it and template releases on jsDelivr @latest reach the page within the hour.
+const FOOTER = {
+  site: 'https://tleehealth.com/',
+  links: [
+    { label: 'Terms', href: '/terms' },
+    { label: 'Privacy', href: '/privacy' },
+  ],
+  tagline: 'BAA with every practice · every read audit-logged · encrypted at rest',
+};
+app.get('/', async (c) =>
+  c.html(pub('index.html').toString().replace('<!--pfs-footer-->', await footerHtml(FOOTER))),
+);
 app.get('/healthz', (c) => c.text('ok'));
 
 // The app: one shell for the team, patients and sign-in. It talks only to /api/v1.
