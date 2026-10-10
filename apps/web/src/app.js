@@ -147,6 +147,14 @@ const jwksRoute = (c) => {
 };
 app.get('/.well-known/jwks.json', jwksRoute);
 app.get('/.well-known/jwks-sandbox.json', jwksRoute);
+app.get('/.well-known/openwebring.json', (c) =>
+  c.json({
+    openwebring: '0.1',
+    site: { url: 'https://tleehealth.com/', name: 'tleehealth' },
+    made_by: 'both',
+    rings: [{ ring: 'https://rssamplifier.com/ring/profullstack', slug: 'tleehealth-com' }],
+  }),
+);
 app.get('/terms', (c) => c.html(pub('terms.html').toString()));
 app.get('/privacy', (c) => c.html(pub('privacy.html').toString()));
 app.get('/robots.txt', (c) => c.text('User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /portal\n'));
