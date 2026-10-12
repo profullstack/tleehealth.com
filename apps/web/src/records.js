@@ -282,7 +282,10 @@ let jwtKey = null;
 function privateKey() {
   const pem = process.env.CLIENT_JWT_PRIVATE_KEY;
   if (!pem) return null;
-  if (!jwtKey || jwtKey.pem !== pem) jwtKey = { pem, key: createPrivateKey(pem.replace(/\\n/g, '\n')) };
+  // The vault and the env file each add a level of escaping, so a PEM can arrive
+  // with literal \n, \\n, or real newlines left with a stray backslash. Base64
+  // never contains a backslash, so collapsing every form to a newline is safe.
+  if (!jwtKey || jwtKey.pem !== pem) jwtKey = { pem, key: createPrivateKey(pem.replace(/\\+(\n|n)/g, '\n')) };
   return jwtKey.key;
 }
 
