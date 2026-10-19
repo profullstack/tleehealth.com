@@ -42,6 +42,14 @@ describe('web', () => {
   test('landing page has no unfilled design holes', async () => {
     expect(await (await get('/')).text()).not.toContain('{{');
   });
+  test('landing footer server-renders the Profullstack webring row, one copyright line', async () => {
+    const home = await (await get('/')).text();
+    const foot = home.slice(home.indexOf('<footer class="site-foot">'), home.indexOf('</footer>', home.indexOf('<footer class="site-foot">')));
+    expect(foot).toContain('class="webring"');
+    expect(foot).toContain('https://rssamplifier.com/ring/profullstack/next?from=https%3A%2F%2Ftleehealth.com%2F');
+    expect(foot).toContain('https://rssamplifier.com/ring/profullstack/previous?from=https%3A%2F%2Ftleehealth.com%2F');
+    expect(foot.match(/&copy;/g)?.length).toBe(1);
+  });
   test('healthz', async () => expect((await get('/healthz')).status).toBe(200));
   test('api health reports the database', async () => {
     const res = await get('/api/v1/health');
