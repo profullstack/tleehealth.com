@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ping } from '@tleehealth/db';
-import { footerHtml } from '@profullstack/footer';
 import { Hono } from 'hono';
 import { api, coinpayWebhook } from './api.js';
+import { withPitFooter } from './pit-footer.js';
 import * as auth from './auth.js';
 import * as calls from './calls.js';
 import * as records from './records.js';
@@ -25,24 +25,15 @@ app.use('*', async (c, next) => {
   if (c.req.path.startsWith('/api/')) c.header('cache-control', 'no-store');
 });
 
-// The landing page is built from the design canvas (design/Main.dc.html).
-// The footer is @profullstack/footer, rendered on the server so the ring's verifier
-// sees it and template releases on jsDelivr @latest reach the page within the hour.
-const FOOTER = {
-  site: 'https://tleehealth.com/',
-  links: [
-    { label: 'Terms', href: '/terms' },
-    { label: 'Privacy', href: '/privacy' },
-  ],
-  tagline: 'BAA with every practice · every read audit-logged · encrypted at rest',
-};
-app.get('/', async (c) =>
-  c.html(pub('index.html').toString().replace('<!--pfs-footer-->', await footerHtml(FOOTER))),
-);
+// The landing page is built from the design canvas (design/Main.dc.html). Every
+// page gets the pit.world network footer as the last thing in <body>.
+const page = async (c, name) =>
+  c.html(await withPitFooter(pub(name).toString().replace('<!--year-->', String(new Date().getFullYear()))));
+app.get('/', (c) => page(c, 'index.html'));
 app.get('/healthz', (c) => c.text('ok'));
 
 // The app: one shell for the team, patients and sign-in. It talks only to /api/v1.
-const shell = (c) => c.html(pub('app/index.html').toString());
+const shell = (c) => page(c, 'app/index.html');
 for (const p of ['/app', '/app/*', '/signin', '/portal', '/portal/*']) app.get(p, shell);
 app.get('/patient', (c) => c.redirect('/portal', 301));
 const asset = (name, type) => (c) =>
@@ -168,8 +159,8 @@ app.get('/.well-known/openwebring.json', (c) =>
     rings: [{ ring: 'https://rssamplifier.com/ring/profullstack', slug: 'tleehealth-com' }],
   }),
 );
-app.get('/terms', (c) => c.html(pub('terms.html').toString()));
-app.get('/privacy', (c) => c.html(pub('privacy.html').toString()));
+app.get('/terms', (c) => page(c, 'terms.html'));
+app.get('/privacy', (c) => page(c, 'privacy.html'));
 app.get('/robots.txt', (c) => c.text('User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /portal\n'));
 app.get('/llms.txt', (c) =>
   c.text(`# tleehealth
