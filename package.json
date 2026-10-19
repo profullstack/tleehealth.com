@@ -1,6 +1,6 @@
 {
   "name": "tleehealth.com",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Telehealth and practice management: scheduling, prescriptions, labs, AI follow-up calls and health-record import.",

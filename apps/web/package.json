@@ -1,13 +1,12 @@
 {
   "name": "@tleehealth/web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "bun src/main.js"
   },
   "dependencies": {
-    "@profullstack/footer": "latest",
     "@simplewebauthn/browser": "^13",
     "@simplewebauthn/server": "^13.2.0",
     "@tleehealth/db": "workspace:*",
