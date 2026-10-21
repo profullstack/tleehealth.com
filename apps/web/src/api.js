@@ -1410,6 +1410,7 @@ api.get('/orgs/:org/billing', async (c) => {
   const payments = await db()`
     select p.amount_cents, p.status, p.created_at from payments p
     where p.raw->'payment'->'metadata'->>'org_id' = ${me.org_id} or p.raw->'metadata'->>'org_id' = ${me.org_id}
+       or p.raw->'data'->'metadata'->>'org_id' = ${me.org_id}
     order by p.created_at desc limit 24`;
   return c.json({ billing: await billing(me.org_id), payments });
 });
@@ -1419,17 +1420,18 @@ api.post('/orgs/:org/billing/checkout', async (c) => {
   if (!paymentsEnabled()) return c.json({ error: 'payments are not switched on yet' }, 503);
   const b = await billing(me.org_id);
   if (b.monthly_cents === null) return c.json({ error: 'over 1,000 seats: contact us for pricing' }, 400);
-  // Crypto only: Stripe banned the owner, so CoinPay's card path (which goes
-  // through Stripe) must never be offered. See memory no-stripe-banned.
+  // A CoinPay hosted checkout session: the payer picks any coin the business holds
+  // a wallet for, or PayPal. No card path: Stripe banned the owner (memory
+  // no-stripe-banned), and CoinPay's session page offers no Stripe card option.
   let checkoutUrl;
   try {
     ({ checkoutUrl } = await createCheckout({
     user,
+    email: user.email,
+    accountId: String(user.id),
     amountCents: b.monthly_cents,
     description: `tleehealth: ${me.org_name}, 1 month, ${b.seats} seat${b.seats === 1 ? '' : 's'}`,
     metadata: { org_id: me.org_id, kind: 'month', seats: String(b.seats) },
-    blockchain: config.coinpay.defaultChain,
-    paymentMethod: 'crypto',
     successUrl: `${config.siteUrl}/app/billing?paid=1`,
     cancelUrl: `${config.siteUrl}/app/billing`,
     }));
