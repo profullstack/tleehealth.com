@@ -1,5 +1,6 @@
-// Billing checkout: crypto only (Stripe is banned for the owner, so CoinPay's
-// card path must never be requested), and a CoinPay refusal is a readable 502.
+// Billing checkout: a CoinPay hosted checkout session (any coin or PayPal, never a
+// card: Stripe is banned for the owner) filed under who paid and for which site,
+// and a CoinPay refusal is a readable 502.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { close, configured } from '../packages/db/src/index.js';
 import { migrate } from '../packages/db/src/migrate.js';
@@ -7,7 +8,7 @@ import { migrate } from '../packages/db/src/migrate.js';
 describe.skipIf(!configured())('billing checkout', () => {
   const realFetch = globalThis.fetch;
   const sent = [];
-  let reply = { status: 201, body: { success: true, payment: { id: 'pay_test_1' } } };
+  let reply = { status: 201, body: { success: true, id: 'cs_test1', url: 'https://coinpayportal.com/checkout/cs_test1' } };
   let web, auth, cookie, orgId;
 
   beforeAll(async () => {
@@ -40,12 +41,18 @@ describe.skipIf(!configured())('billing checkout', () => {
 
   const checkout = () => web.request(`/api/v1/orgs/${orgId}/billing/checkout`, { method: 'POST', headers: { cookie } });
 
-  test('asks CoinPay for crypto only, never card', async () => {
+  test('opens a hosted checkout session filed under the payer, never a card', async () => {
     const res = await checkout();
     expect(res.status).toBe(200);
-    expect((await res.json()).checkout_url).toContain('/pay/pay_test_1');
-    expect(sent.at(-1).payment_method).toBe('crypto');
-    expect(sent.at(-1).amount).toBe(10);
+    expect((await res.json()).checkout_url).toBe('https://coinpayportal.com/checkout/cs_test1');
+    const body = sent.at(-1);
+    expect(body.amount).toBe(10);
+    expect(body.customer_email).toMatch(/^bill\d+@example\.com$/);
+    expect(body.account_id).toBeTruthy();
+    expect(body.property).toBeTruthy();
+    expect(body.metadata.org_id).toBe(orgId);
+    expect(body.payment_method).toBeUndefined();
+    expect(body.blockchain).toBeUndefined();
   });
 
   test('a CoinPay refusal is a readable 502, not an internal error', async () => {
