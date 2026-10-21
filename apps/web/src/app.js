@@ -3,6 +3,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ping } from '@tleehealth/db';
 import { Hono } from 'hono';
+import { x402Gateway } from '@profullstack/x402-gateway/hono';
+import { createCrawlGate } from './crawl-gate.js';
 import { api, coinpayWebhook } from './api.js';
 import { withPitFooter } from './pit-footer.js';
 import * as auth from './auth.js';
@@ -24,6 +26,10 @@ app.use('*', async (c, next) => {
   c.header('referrer-policy', 'strict-origin-when-cross-origin');
   if (c.req.path.startsWith('/api/')) c.header('cache-control', 'no-store');
 });
+
+// Training crawlers buy a day pass before anything else is done for them.
+export const crawlGate = createCrawlGate();
+if (crawlGate) app.use('*', x402Gateway(crawlGate));
 
 // The landing page is built from the design canvas (design/Main.dc.html). Every
 // page gets the pit.world network footer as the last thing in <body>.

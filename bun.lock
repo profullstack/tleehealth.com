@@ -7,8 +7,9 @@
     },
     "apps/web": {
       "name": "@tleehealth/web",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
+        "@profullstack/x402-gateway": "^0.11.0",
         "@simplewebauthn/browser": "^13",
         "@simplewebauthn/server": "^13.2.0",
         "@tleehealth/db": "workspace:*",
@@ -82,11 +83,15 @@
 
     "@profullstack/hqtui": ["@profullstack/hqtui@0.8.0", "", { "bin": { "hqtui": "bin/hqtui.mjs" } }, "sha512-7dLq4Tb/GO7PyUaSRDf86K0AjeD55aBYW2Y7Mb2CM8YEAANno79ey0o9Dzr7QiGz/smJByah+gGp5UdAdDVGrA=="],
 
+    "@profullstack/keys": ["@profullstack/keys@0.1.0", "", {}, "sha512-Vys47LvS5ivhdZu4SYOxh9Le3DEmWhjP0+CtrU45RhXAbY0ZFG/2Dk9V1bIIUGDp8UWMJqctvUD21JrNjfh04w=="],
+
     "@profullstack/orgs": ["@profullstack/orgs@0.2.0", "", { "peerDependencies": { "postgres": "^3.4.0" }, "bin": { "orgs": "src/cli.js" } }, "sha512-KYax/CBA4MGIqWennoroPjbsrCthY1iXwvad7YUHUwLwus9FyLDOriRnyLMWjMVCG/pihkDfKALUfdCYFGu+Ng=="],
 
     "@profullstack/tleehealth": ["@profullstack/tleehealth@workspace:packages/cli"],
 
     "@profullstack/tleehealth-mcp": ["@profullstack/tleehealth-mcp@workspace:packages/mcp"],
+
+    "@profullstack/x402-gateway": ["@profullstack/x402-gateway@0.11.0", "", { "dependencies": { "@profullstack/keys": "^0.1.0" } }, "sha512-Lfrz+SRTwQZfcoCaVtaaMNPJx74Lp/5oyS7vJJAEuJmH1TjBzhE7dWquISkj1p42oc+VW5I9xH9p7YhEKqmr4Q=="],
 
     "@simplewebauthn/browser": ["@simplewebauthn/browser@13.3.0", "", {}, "sha512-BE/UWv6FOToAdVk0EokzkqQQDOWtNydYlY6+OrmiZ5SCNmb41VehttboTetUM3T/fr6EAFYVXjz4My2wg230rQ=="],
 
