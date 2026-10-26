@@ -1,5 +1,5 @@
 # One image: the Bun web app and its API. dev2 builds this on every merge to master.
-FROM oven/bun:1.4.2-slim
+FROM oven/bun:1.4.4-slim
 WORKDIR /app
 COPY package.json bun.lock* ./
 COPY apps/web/package.json apps/web/
