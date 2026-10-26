@@ -101,6 +101,12 @@ label.f { display: flex; flex-direction: column; gap: 6px; font-size: 13px; colo
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 form.stack { gap: 12px; }
 .err { color: var(--alert); font-size: 13px; min-height: 18px; }
+/* The shared profile fields (@profullstack/profile renderProfileFields), made to read like label.f. */
+.pfs-profile { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.pfs-profile__row { display: flex; flex-direction: column; gap: 6px; }
+.pfs-profile__row label { font-size: 13px; color: var(--muted); }
+.pfs-profile__optional { color: var(--dim); }
+.pfs-profile__error { color: var(--alert); font-size: 13px; margin: 0; }
 
 /* modal + toast */
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line-2); border-radius: 18px; padding: 0; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
