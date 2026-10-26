@@ -90,7 +90,7 @@ async function api(method, path, body) {
     go('/signin');
     throw new ApiError('Please sign in');
   }
-  if (!res.ok) throw new ApiError(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw Object.assign(new ApiError(data.error || `Request failed (${res.status})`), { errors: data.errors });
   return data;
 }
 const get = (p) => api('GET', p);
@@ -163,7 +163,7 @@ function go(path) {
 }
 window.addEventListener('popstate', () => render());
 document.addEventListener('click', (e) => {
-  const a = e.target.closest('a[href^="/app"], a[href^="/portal"], a[href="/signin"]');
+  const a = e.target.closest('a[href^="/app"], a[href^="/portal"], a[href="/signin"], a[href="/signup"]');
   if (a && !e.metaKey && !e.ctrlKey && !a.target) {
     e.preventDefault();
     go(a.getAttribute('href'));
@@ -186,7 +186,7 @@ async function render() {
   const path = location.pathname;
   const q = new URLSearchParams(location.search);
   try {
-    if (path === '/signin') return renderSignin(q);
+    if (path === '/signin' || path === '/signup') return renderSignin(q, path === '/signup');
     await loadMe();
     if (path === '/portal/records') return renderRecords(q);
     if (path.startsWith('/portal')) return renderPortal();
@@ -260,32 +260,68 @@ function bindShell() {
 
 /* --------------------------------------------------------------- sign-in -- */
 
-function renderSignin(q) {
+/**
+ * The shared profile fields (@profullstack/profile), from the <template> the
+ * server renders into the shell, filled with `values`.
+ */
+function profileFields(values = {}) {
+  const t = document.getElementById('profile-fields');
+  if (!t) return '';
+  const box = document.createElement('div');
+  box.append(t.content.cloneNode(true));
+  for (const input of box.querySelectorAll('input')) if (values[input.name] != null) input.setAttribute('value', values[input.name]);
+  return box.innerHTML;
+}
+
+/** Show the field errors a 400 from the profile validation carried, beside each box. */
+function showFieldErrors(form, errors = {}) {
+  form.querySelectorAll('.pfs-profile__error').forEach((p) => p.remove());
+  form.querySelectorAll('[aria-invalid]').forEach((i) => i.removeAttribute('aria-invalid'));
+  for (const [name, msg] of Object.entries(errors)) {
+    const input = form.querySelector(`[name="${name}"]`);
+    if (!input) continue;
+    input.setAttribute('aria-invalid', 'true');
+    const p = document.createElement('p');
+    p.className = 'pfs-profile__error';
+    p.setAttribute('role', 'alert');
+    p.textContent = msg;
+    input.after(p);
+  }
+}
+
+function renderSignin(q, signup = false) {
   const email = q.get('email') ?? '';
   root.innerHTML = `<div class="center"><div class="auth">
     <a class="brand" href="/" style="padding:0">${logo} tleehealth</a>
-    <h1>Sign in</h1>
+    <h1>${signup ? 'Create your account' : 'Sign in'}</h1>
     ${q.get('error') === 'expired' ? '<p class="err">That link has expired or was already used. Send a new one.</p>' : ''}
     <form id="link-form" class="stack">
-      <label class="f">Email<input name="email" type="email" autocomplete="email webauthn" required value="${esc(email)}"></label>
-      <button class="primary" type="submit">Email me a sign-in link</button>
+      <label class="f">Email<input name="email" type="email" autocomplete="email${signup ? '' : ' webauthn'}" required value="${esc(email)}"></label>
+      ${signup ? profileFields() : ''}
+      <button class="primary" type="submit">${signup ? 'Email me a link to finish' : 'Email me a sign-in link'}</button>
       <p class="err" id="link-err"></p>
     </form>
-    <div class="or">or</div>
-    <button id="passkey-btn" type="button">Sign in with a passkey</button>
-    <p class="dim small">No passwords. New here? Enter your email and the link creates your account. Patients: use the email your practice has on file.</p>
+    ${signup ? '' : `<div class="or">or</div>
+    <button id="passkey-btn" type="button">Sign in with a passkey</button>`}
+    <p class="dim small">${signup ? 'Already have an account? <a href="/signin">Sign in</a>.' : 'No passwords. New here? <a href="/signup">Create an account</a>, or enter your email and the link creates one. Patients: use the email your practice has on file.'}</p>
   </div></div>`;
   document.getElementById('link-form').onsubmit = async (e) => {
     e.preventDefault();
-    const { email } = formData(e.target);
+    const data = formData(e.target);
     try {
-      await post('/auth/link', { email });
-      e.target.innerHTML = `<div class="card"><div class="card-b"><h2>Check your email</h2><p class="muted">We sent a sign-in link to <b>${esc(email)}</b>. It works once and expires in 20 minutes.</p></div></div>`;
+      await post('/auth/link', signup ? { ...data, mode: 'signup' } : { email: data.email });
+      e.target.innerHTML = `<div class="card"><div class="card-b"><h2>Check your email</h2><p class="muted">We sent a sign-in link to <b>${esc(data.email)}</b>. It works once and expires in 20 minutes.</p></div></div>`;
     } catch (err) {
+      showFieldErrors(e.target, err.errors);
       document.getElementById('link-err').textContent = err.message;
     }
   };
-  document.getElementById('passkey-btn').onclick = passkeySignIn;
+  if (signup) {
+    // Fills the company box from a work email; a fresh <script> runs on each render.
+    const s = document.createElement('script');
+    s.src = '/assets/profile.js';
+    root.append(s);
+  } else document.getElementById('passkey-btn').onclick = passkeySignIn;
 }
 
 async function passkeySignIn() {
@@ -1193,7 +1229,7 @@ async function viewBilling(q) {
 /* -------------------------------------------------------------- settings -- */
 
 async function viewSettings() {
-  const [{ keys }, cs] = await Promise.all([get('/keys'), get(`/orgs/${state.orgId}/call-settings`)]);
+  const [{ keys }, cs, { profile }] = await Promise.all([get('/keys'), get(`/orgs/${state.orgId}/call-settings`), get('/me/profile')]);
   const s = cs.settings;
   const html = `
   <div class="head"><h1>Settings</h1><button id="signout">Sign out</button></div>
@@ -1202,6 +1238,9 @@ async function viewSettings() {
       <section class="card"><div class="card-h"><h2>You</h2></div><div class="card-b">
         <form id="me-form" class="row"><label class="f" style="flex:1">Name<input name="name" value="${esc(state.me.user.name ?? '')}"></label><button type="submit" style="align-self:flex-end">Save</button></form>
         <p class="dim small">${esc(state.me.user.email)}</p></div></section>
+      <section class="card" id="contact"><div class="card-h"><h2>Contact details</h2></div><div class="card-b">
+        <form id="contact-form" class="stack">${profileFields(profile)}<div><button type="submit">Save contact details</button></div></form>
+        <p class="dim small">Private to your account. Sent with ${esc(state.me.user.email)}.</p></div></section>
       <section class="card"><div class="card-h"><h2>Passkeys</h2><button class="sm" id="add-passkey">Add a passkey</button></div>
         <div class="card-b muted">${state.me.passkeys ? `${state.me.passkeys} passkey${state.me.passkeys === 1 ? '' : 's'} saved. Sign in with Face ID, Touch ID or your security key.` : 'Add one to sign in without waiting for an email.'}</div></section>
       ${is(ADMIN) ? `<section class="card"><div class="card-h"><h2>AI calls</h2>${cs.calling_configured ? '' : '<span class="badge b-warn">not connected yet</span>'}</div><div class="card-b">
@@ -1231,6 +1270,18 @@ async function viewSettings() {
       document.getElementById('me-form').onsubmit = (e) => {
         e.preventDefault();
         act(() => api('PATCH', '/me', formData(e.target)), 'Saved');
+      };
+      document.getElementById('contact-form').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          // Every box, blanks included, so clearing one clears it.
+          await api('PATCH', '/me/profile', Object.fromEntries(new FormData(e.target)));
+          showFieldErrors(e.target);
+          toast('Contact details saved');
+        } catch (err) {
+          showFieldErrors(e.target, err.errors);
+          toast(err.message, true);
+        }
       };
       document.getElementById('calls-form')?.addEventListener('submit', (e) => {
         e.preventDefault();

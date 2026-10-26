@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ping } from '@tleehealth/db';
+import { COLUMNS as PROFILE_COLUMNS, PROFILE_ENHANCE_SCRIPT, renderProfileFields } from '@profullstack/profile';
 import { Hono } from 'hono';
 import { x402Gateway } from '@profullstack/x402-gateway/hono';
 import { createCrawlGate } from './crawl-gate.js';
-import { api, coinpayWebhook } from './api.js';
+import { api, coinpayWebhook, saveSignup } from './api.js';
 import { withPitFooter } from './pit-footer.js';
 import * as auth from './auth.js';
 import * as calls from './calls.js';
@@ -39,13 +40,31 @@ app.get('/', (c) => page(c, 'index.html'));
 app.get('/healthz', (c) => c.text('ok'));
 
 // The app: one shell for the team, patients and sign-in. It talks only to /api/v1.
-const shell = (c) => page(c, 'app/index.html');
-for (const p of ['/app', '/app/*', '/signin', '/portal', '/portal/*']) app.get(p, shell);
+// The shared profile fields (@profullstack/profile) ride in the shell as a
+// <template>: the signup form and Settings clone them, so the markup is the
+// package's own. Email is each form's own box, so the package renders the other five.
+const PROFILE_TEMPLATE = `<template id="profile-fields">${renderProfileFields({
+  fields: PROFILE_COLUMNS.filter((f) => f !== 'email'),
+})}</template>`;
+const shell = async (c) =>
+  c.html(
+    await withPitFooter(
+      pub('app/index.html')
+        .toString()
+        .replace('<!--year-->', String(new Date().getFullYear()))
+        .replace('<!--profile-fields-->', PROFILE_TEMPLATE),
+    ),
+  );
+for (const p of ['/app', '/app/*', '/signin', '/signup', '/portal', '/portal/*']) app.get(p, shell);
 app.get('/patient', (c) => c.redirect('/portal', 301));
 const asset = (name, type) => (c) =>
   c.body(pub(`app/${name}`), 200, { 'content-type': type, 'cache-control': 'no-cache' });
 app.get('/assets/app.js', asset('app.js', 'text/javascript; charset=utf-8'));
 app.get('/assets/app.css', asset('app.css', 'text/css; charset=utf-8'));
+// The signup form's company-from-work-email helper, from @profullstack/profile.
+app.get('/assets/profile.js', (c) =>
+  c.body(PROFILE_ENHANCE_SCRIPT, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
+);
 // The WebAuthn browser helper, served from our own origin rather than a CDN.
 const WEBAUTHN_JS = [join(here, '..', 'node_modules'), join(root, 'node_modules')]
   .map((d) => join(d, '@simplewebauthn/browser/dist/bundle/index.umd.min.js'))
@@ -68,6 +87,7 @@ app.get('/auth/magic', async (c) => {
   const token = c.req.query('t');
   const s = token ? await auth.consumeLoginLink(token, { userAgent: c.req.header('user-agent') }) : null;
   if (!s) return c.redirect('/signin?error=expired', 302);
+  await saveSignup(s.user, s.profile);
   c.header('set-cookie', auth.sessionCookie(s.sessionId));
   return c.redirect('/app', 302);
 });
@@ -183,6 +203,7 @@ Pricing: $10 per team seat per month, or $199/month for up to 1,000 seats. Patie
 Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (create a key in the app under Settings).
 - GET /health
 - GET /me                                   your practices and user type in each
+- GET|PUT|PATCH /me/profile                 your contact details: first_name, last_name, company_domain, job_title, linkedin_url
 - GET /schedule?date=YYYY-MM-DD&org=<id>    the day's appointments
 - GET /orgs/:org/today                      appointments + refills, labs and summaries waiting on a human
 - GET|POST /orgs/:org/people?type=team|patient|lead

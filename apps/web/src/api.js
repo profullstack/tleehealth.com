@@ -1,5 +1,6 @@
 import { db, orgs } from '@tleehealth/db';
 import { createCheckout, paymentsEnabled, settleWebhook, verifyWebhook } from '@tleehealth/payments';
+import { createProfileStore, mountProfileRoutes, saveSignupProfile, validateProfile } from '@profullstack/profile';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import * as auth from './auth.js';
@@ -114,12 +115,21 @@ async function personIn(orgId, id, types, what = 'person') {
 /* ----------------------------------------------------------------- sign-in -- */
 
 api.post('/auth/link', async (c) => {
-  const { email } = await body(c);
-  const e = str(email, 254)?.toLowerCase();
+  const b = await body(c);
+  const e = str(b.email, 254)?.toLowerCase();
   if (!e || !EMAIL.test(e)) return c.json({ error: 'enter a valid email address' }, 400);
+  // The signup form carries the shared profile fields; plain sign-in does not and
+  // is never asked for them. Checked before any link exists, with the same answer
+  // for a known or unknown address.
+  let profile = null;
+  if (b.mode === 'signup') {
+    const check = validateProfile(b);
+    if (!check.ok) return c.json({ error: 'Some fields need fixing.', errors: check.errors }, 400);
+    profile = check.profile;
+  }
   // Same answer whether or not the address has an account.
   try {
-    await sendLoginLink({ email: e, url: await auth.createLoginLink(e) });
+    await sendLoginLink({ email: e, url: await auth.createLoginLink(e, { profile }) });
   } catch (err) {
     console.error(`[auth] could not send link: ${err?.message ?? err}`);
   }
@@ -161,6 +171,31 @@ api.post('/auth/passkey/login/verify', async (c) => {
 });
 
 /* ---------------------------------------------------------------- account -- */
+
+/*
+ * The shared Profullstack profile (@profullstack/profile): email, names, company
+ * domain, job title and LinkedIn, in user_profiles. The store is made on first use
+ * because the database is (tests and the CLI load this file without one).
+ * GET/PUT/PATCH /api/v1/me/profile are the package's own handlers.
+ */
+let profileStore = null;
+export const profiles = new Proxy({}, { get: (_, k) => (profileStore ??= createProfileStore(db()))[k] });
+mountProfileRoutes(api, {
+  path: '/me/profile',
+  store: profiles,
+  getUser: async (_req, c) => {
+    const u = await currentUser(c);
+    return u ? { id: u.id, email: u.email } : null;
+  },
+});
+
+/** Save what a signup typed, once the link has proved the mailbox. Never blocks sign-in. */
+export async function saveSignup(user, profile) {
+  if (!profile) return;
+  await saveSignupProfile(profiles, user.id, profile, { email: user.email }).catch((err) =>
+    console.error(`[auth] signup profile save failed: ${err?.message ?? err}`),
+  );
+}
 
 api.get('/me', async (c) => {
   const user = await requireUser(c);
