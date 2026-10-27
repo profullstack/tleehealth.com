@@ -182,3 +182,26 @@ export const recordFile = (auth, id) => download(auth, `/api/v1/records/files/${
 
 /** Who at which practice viewed, downloaded or exported the records you shared. */
 export const recordAccess = (auth) => call(auth, '/api/v1/records/access');
+
+/* ------------------------------------------------- credit codes + invites -- */
+
+const postJson = (auth, path, body) =>
+  call(auth, path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+
+/** Your balance of pro_days (days of a practice's paid plan) and its history. */
+export const creditBalance = (auth) => call(auth, '/api/v1/credits');
+
+/** Redeem a credit code; with an org (yours to administer) the days go straight onto its plan. */
+export async function redeemCode(auth, { code, org, keep = false } = {}) {
+  const orgId = keep ? undefined : await resolveOrg(auth, org).catch(() => undefined);
+  return postJson(auth, '/api/v1/credits/redeem', { code, ...(orgId ? { org_id: orgId } : {}) });
+}
+
+/** Move days from your balance onto a practice's paid plan. */
+export async function applyCredits(auth, { org, days } = {}) {
+  const id = await resolveOrg(auth, org);
+  return postJson(auth, `/api/v1/orgs/${id}/billing/apply-credits`, { days: Number(days) });
+}
+
+export const invites = (auth) => call(auth, '/api/v1/invites');
+export const createInvite = (auth, { note } = {}) => postJson(auth, '/api/v1/invites', { note });

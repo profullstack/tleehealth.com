@@ -9,6 +9,7 @@ import { sendAddedToOrg, sendLoginLink } from './mail.js';
 import * as calls from './calls.js';
 import * as nav from './navigation.js';
 import * as records from './records.js';
+import * as credits from './credits.js';
 
 /**
  * /api/v1: the only thing any client talks to. The browser app, the CLI, the TUI
@@ -129,7 +130,10 @@ api.post('/auth/link', async (c) => {
   }
   // Same answer whether or not the address has an account.
   try {
-    await sendLoginLink({ email: e, url: await auth.createLoginLink(e, { profile }) });
+    // An invite (from /i/<code>, or typed) rides on the emailed link, so opening
+    // it on another device still counts. Only a link that creates the account uses it.
+    const invite = credits.cleanInvite(b.invite) ?? credits.cleanInvite(getCookie(c, credits.INVITE_COOKIE));
+    await sendLoginLink({ email: e, url: await auth.createLoginLink(e, { profile, invite }) });
   } catch (err) {
     console.error(`[auth] could not send link: ${err?.message ?? err}`);
   }
@@ -1419,6 +1423,71 @@ api.post('/orgs/:org/appointments/:id/call', async (c) => {
   await calls.tick({ manualOrgId: me.org_id });
   const [after] = await db()`select id, status, skip_reason, last_error from calls where id = ${row.id}`;
   return c.json({ call: after });
+});
+
+/* ------------------------------------------------- credit codes + invites -- */
+// Codes and invites grant pro_days into the user's balance; an owner or org
+// manager applies them to a practice (org_billing.paid_through). Minting is
+// staff-only and done with scripts/mint-credit-code.js, never over the API.
+
+api.get('/credits', async (c) => {
+  const user = await requireUser(c);
+  const g = credits.getCredits();
+  const [balance, history] = await Promise.all([g.balance(user.id, credits.UNIT), g.history(user.id, credits.UNIT)]);
+  return c.json({ unit: credits.UNIT, balance, history });
+});
+
+api.post('/credits/redeem', async (c) => {
+  const user = await requireUser(c);
+  const b = await body(c);
+  const code = str(b.code, 64);
+  if (!code) return c.json({ error: 'enter a code' }, 400);
+  // Check the practice before the code is spent, so a bad org never burns it.
+  let me = null;
+  if (b.org_id) ({ me } = await member(c, b.org_id, ADMIN));
+  const r = await credits.getCredits().redeem(code, user.id);
+  if (!r.ok) return c.json({ error: credits.REDEEM_MESSAGES[r.reason] ?? 'that code did not work', reason: r.reason }, 400);
+  let applied = null;
+  if (me && r.grant.unit === credits.UNIT) {
+    applied = await credits.applyDays(user.id, me.org_id, r.grant.amount);
+    if (applied.ok) await audit(me.org_id, user.id, 'billing.credit_apply');
+  }
+  return c.json({ ok: true, grant: r.grant, applied, balance: await credits.getCredits().balance(user.id, credits.UNIT) });
+});
+
+api.post('/orgs/:org/billing/apply-credits', async (c) => {
+  const { me, user } = await member(c, c.req.param('org'), ADMIN);
+  const days = Number((await body(c)).days);
+  const r = await credits.applyDays(user.id, me.org_id, days);
+  if (!r.ok) return c.json({ error: r.error, balance: r.balance }, 400);
+  await audit(me.org_id, user.id, 'billing.credit_apply');
+  return c.json(r);
+});
+
+api.get('/invites', async (c) => {
+  const user = await requireUser(c);
+  const aff = credits.getAffiliates();
+  const [quota, invites, invited_by] = await Promise.all([aff.quota(user.id), aff.invites(user.id), aff.invitedBy(user.id)]);
+  const new_account = Date.now() - new Date(user.created_at).getTime() <= credits.INVITEE_MAX_AGE_DAYS * 86400_000;
+  return c.json({ quota, invites, can_accept: !invited_by && new_account, bonus_days: credits.INVITE_BONUS_DAYS });
+});
+
+api.post('/invites', async (c) => {
+  const user = await requireUser(c);
+  const note = str((await body(c)).note, 120) ?? '';
+  const aff = credits.getAffiliates();
+  if ((await aff.quota(user.id)).left < 1) return c.json({ error: 'no invites left' }, 400);
+  const invite = await aff.createInvite(user.id, note);
+  return c.json({ invite: { ...invite, url: `${config.siteUrl}/i/${invite.code}` }, quota: await aff.quota(user.id) }, 201);
+});
+
+api.post('/invites/accept', async (c) => {
+  const user = await requireUser(c);
+  const code = credits.cleanInvite((await body(c)).code);
+  if (!code) return c.json({ error: 'enter an invite code' }, 400);
+  const r = await credits.acceptInvite(user.id, code);
+  if (!r.ok) return c.json({ error: credits.ACCEPT_MESSAGES[r.reason] ?? r.reason, reason: r.reason }, 400);
+  return c.json({ ok: true, days: r.inviteeDays });
 });
 
 /* --------------------------------------------------------------- billing -- */

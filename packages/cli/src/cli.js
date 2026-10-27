@@ -27,6 +27,7 @@ import { createInterface } from 'node:readline/promises';
 import {
   caseload, connect, connection, disconnect, exportRecords, health, logTime, providers, recordAccess, recordFile, recordItems, records,
   resolveAuth, saveConfig, schedule, shareConnection, superbill, syncConnection,
+  applyCredits, createInvite, creditBalance, invites, redeemCode,
 } from './client.js';
 
 const HELP = `tleehealth: telehealth and practice management.
@@ -46,6 +47,12 @@ Your health records from other providers (MyChart and any SMART on FHIR portal):
   tleehealth file FILE_ID [--out FILE]                              one attached file
   tleehealth access                                                 who at which practice opened your shared records
   tleehealth disconnect CONNECTION_ID                               remove it and everything it imported
+
+Credit codes and invites (days of a practice's paid plan):
+  tleehealth redeem CODE [--org ORG] [--keep]                       redeem a code onto a practice (--keep: into your balance)
+  tleehealth credits [--apply DAYS] [--org ORG]                     your balance; --apply moves days onto a practice
+  tleehealth invite [--note TEXT]                                   make an invite link (3 per account)
+  tleehealth invites [--json]                                       your invites and what is left
 
   tleehealth health                                                 is the API up
   tleehealth login [KEY]                                            save an API key
@@ -297,6 +304,42 @@ export async function main(argv = process.argv.slice(2)) {
       if (!id) throw new Error('usage: tleehealth file FILE_ID [--out FILE]');
       const r = await recordFile(auth, id);
       await save(r.bytes, typeof flags.out === 'string' ? flags.out : (r.filename ?? id));
+      return 0;
+    }
+    case 'redeem': {
+      if (!rest[0]) throw new Error('usage: tleehealth redeem CODE [--org ORG] [--keep]');
+      const r = await redeemCode(auth, { code: rest[0], org: flags.org, keep: Boolean(flags.keep) });
+      console.log(
+        r.applied?.ok
+          ? `Added ${r.applied.days} days. Paid through ${String(r.applied.paid_through).slice(0, 10)}.`
+          : `Added ${r.grant.amount} days to your balance (${r.balance} now).${r.applied?.error ? ` ${r.applied.error}` : ''}`,
+      );
+      return 0;
+    }
+    case 'credits': {
+      if (flags.apply) {
+        const r = await applyCredits(auth, { org: flags.org, days: flags.apply });
+        console.log(`Added ${r.days} days. Paid through ${String(r.paid_through).slice(0, 10)}. Balance ${r.balance}.`);
+        return 0;
+      }
+      const c = await creditBalance(auth);
+      console.log(flags.json ? JSON.stringify(c, null, 2) : `${c.balance} ${c.unit.replace('_', ' ')}`);
+      return 0;
+    }
+    case 'invite': {
+      const r = await createInvite(auth, { note: flags.note });
+      console.log(`${r.invite.url}
+(shown once; ${r.quota.left} of ${r.quota.total} left)`);
+      return 0;
+    }
+    case 'invites': {
+      const r = await invites(auth);
+      if (flags.json) console.log(JSON.stringify(r, null, 2));
+      else {
+        console.log(`${r.quota.left} of ${r.quota.total} invites left. Each gives you both ${r.bonus_days} days.`);
+        for (const i of r.invites)
+          console.log(`  ${new Date(i.createdAt).toISOString().slice(0, 10)}  ${(i.note || 'invite').padEnd(24)} ${i.revokedAt ? 'revoked' : i.usedAt ? 'accepted' : 'open'}`);
+      }
       return 0;
     }
     case 'dashboard':

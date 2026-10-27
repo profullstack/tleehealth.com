@@ -19,7 +19,7 @@ export function createCrawlGate(env = process.env) {
     coinpay: { apiKey },
     payTo,
     contact: 'mailto:anthony@profullstack.com',
-    openPaths: ['/healthz', '/install.sh', '/llms.txt', '/api/', '/webhooks/'],
+    openPaths: ['/healthz', '/install.sh', '/llms.txt', '/api/', '/webhooks/', '/i/'],
     exempt: (request) => /(?:^|;\s*)th_session=/.test(request.headers.get('cookie') ?? ''),
   });
 }

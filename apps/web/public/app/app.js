@@ -190,6 +190,11 @@ async function render() {
     await loadMe();
     if (path === '/portal/records') return renderRecords(q);
     if (path.startsWith('/portal')) return renderPortal();
+    if (path === '/app/invites' && !state.orgId) {
+      const v = await viewInvites(q);
+      root.innerHTML = `<div class="center"><div class="auth" style="max-width:640px"><a class="brand" href="/app" style="padding:0">${logo} tleehealth</a>${v.html}<p><a class="btn" href="/app">Set up your practice</a></p></div></div>`;
+      return v.bind();
+    }
     if (!state.orgId) return state.me.patient_of.length && path !== '/app/new' ? go('/portal') : renderNewPractice();
     if (path === '/app/new') return renderNewPractice();
 
@@ -204,6 +209,7 @@ async function render() {
     else if (path === '/app/locations') view = viewLocations();
     else if (path === '/app/billing') view = await viewBilling(q);
     else if (path === '/app/settings') view = await viewSettings();
+    else if (path === '/app/invites') view = await viewInvites(q);
     else view = await viewToday(q);
     root.innerHTML = shell(path, view.html);
     bindShell();
@@ -238,6 +244,7 @@ function shell(path, main) {
       ${navItem('/app/team', 'Team')}
       ${navItem('/app/locations', 'Locations')}
       ${is(ADMIN) ? navItem('/app/billing', 'Billing', o.billing.active ? '' : '<span class="count">unpaid</span>') : ''}
+      ${navItem('/app/invites', 'Invites')}
       ${navItem('/app/settings', 'Settings')}
       ${state.me.patient_of.length ? navItem('/portal', 'My health') : ''}
       ${navItem('/portal/records', 'My records')}
@@ -309,7 +316,8 @@ function renderSignin(q, signup = false) {
     e.preventDefault();
     const data = formData(e.target);
     try {
-      await post('/auth/link', signup ? { ...data, mode: 'signup' } : { email: data.email });
+      const invite = q.get('invite') ?? undefined;
+      await post('/auth/link', signup ? { ...data, mode: 'signup', invite } : { email: data.email, invite });
       e.target.innerHTML = `<div class="card"><div class="card-b"><h2>Check your email</h2><p class="muted">We sent a sign-in link to <b>${esc(data.email)}</b>. It works once and expires in 20 minutes.</p></div></div>`;
     } catch (err) {
       showFieldErrors(e.target, err.errors);
@@ -1192,7 +1200,7 @@ function viewLocations() {
 /* --------------------------------------------------------------- billing -- */
 
 async function viewBilling(q) {
-  const { billing: b, payments } = await get(`/orgs/${state.orgId}/billing`);
+  const [{ billing: b, payments }, { balance }] = await Promise.all([get(`/orgs/${state.orgId}/billing`), get('/credits')]);
   const html = `
   <div class="head"><h1>Billing</h1></div>
   ${q.get('paid') ? '<div class="card"><div class="card-b">Thanks. Your month is added as soon as CoinPay confirms the payment, usually within a few minutes.</div></div>' : ''}
@@ -1206,6 +1214,12 @@ async function viewBilling(q) {
           <dt>Free trial</dt><dd>${new Date(b.trial_ends) > new Date() ? `ends ${fmtDate(b.trial_ends)}` : 'ended'}</dd>
         </dl>
         ${b.payments_enabled ? `<div><button class="primary" id="pay">Pay ${money(b.monthly_cents)} for one month</button></div><p class="dim small">Paid through CoinPay in any major coin or PayPal. Each payment adds one month.</p>` : '<p class="muted">Online payment is not switched on yet. Your practice keeps working; we will email the owner before it is needed.</p>'}
+      </div></section>
+    <section class="card wide" id="redeem"><div class="card-h"><h2>Have a code?</h2><span class="dim small">balance ${balance} day${balance === 1 ? '' : 's'}</span></div>
+      <div class="card-b stack">
+        <form id="redeem-form" class="row"><label class="f" style="flex:1">Credit code<input name="code" class="mono" placeholder="CR-XXXX-XXXX-XXXX-XXXX" required autocomplete="off"></label><button type="submit" style="align-self:flex-end">Redeem for ${esc(state.org.org.name)}</button></form>
+        ${balance > 0 ? `<form id="apply-form" class="row"><label class="f" style="flex:1">Days from your balance<input name="days" type="number" min="1" max="${balance}" value="${balance}"></label><button type="submit" style="align-self:flex-end">Add to ${esc(state.org.org.name)}</button></form>` : ''}
+        <p class="dim small">Credit codes and invites give days of the paid plan. Redeeming here adds them to this practice; days from invites wait in your balance until you add them. <a href="/app/invites">Invite someone</a>.</p>
       </div></section>
     <section class="card narrow"><div class="card-h"><h2>Payments</h2></div>
       ${payments.length ? `<ul class="list">${payments.map((p) => `<li><span>${money(p.amount_cents)}<div class="sub">${fmtDate(p.created_at)}</div></span><span class="badge">${esc(p.status)}</span></li>`).join('')}</ul>` : '<div class="empty">No payments yet.</div>'}
@@ -1222,6 +1236,80 @@ async function viewBilling(q) {
           toast(err.message, true);
         }
       });
+      document.getElementById('redeem-form').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const r = await post('/credits/redeem', { ...formData(e.target), org_id: state.orgId });
+          toast(r.applied?.ok ? `Added ${r.applied.days} days. Paid through ${fmtDate(r.applied.paid_through)}.` : `Added ${r.grant.amount} days to your balance`);
+          await loadMe();
+          render();
+        } catch (err) {
+          toast(err.message, true);
+        }
+      };
+      const apply = document.getElementById('apply-form');
+      if (apply) apply.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const r = await post(`/orgs/${state.orgId}/billing/apply-credits`, { days: Number(formData(e.target).days) });
+          toast(`Added ${r.days} days. Paid through ${fmtDate(r.paid_through)}.`);
+          await loadMe();
+          render();
+        } catch (err) {
+          toast(err.message, true);
+        }
+      };
+    },
+  };
+}
+
+/* --------------------------------------------------------------- invites -- */
+
+async function viewInvites(q) {
+  const { quota, invites, can_accept, bonus_days } = await get('/invites');
+  const state_ = (i) =>
+    i.revokedAt ? 'revoked' : i.usedAt ? `accepted ${fmtDate(i.usedAt)}` : i.expiresAt && i.expiresAt < Date.now() ? 'expired' : `open until ${fmtDate(i.expiresAt)}`;
+  const html = `
+  <div class="head"><h1>Invites</h1></div>
+  ${q.get('joined') ? `<div class="card"><div class="card-b">Welcome. Your invite counted: ${bonus_days} days of the paid plan are in your balance; add them to your practice under Billing.</div></div>` : ''}
+  <div class="cols">
+    <section class="card wide"><div class="card-h"><h2>Invite someone</h2><span class="dim small">${quota.left} of ${quota.total} left</span></div>
+      <div class="card-b stack">
+        <p class="muted">When someone new signs up with your invite, you both get ${bonus_days} days of the paid plan. Each invite works once and expires after 30 days.</p>
+        <form id="inv-form" class="row"><label class="f" style="flex:1">Who is it for? (optional)<input name="note" maxlength="120"></label><button type="submit" style="align-self:flex-end" ${quota.left < 1 ? 'disabled' : ''}>Create invite</button></form>
+        <div id="inv-link"></div>
+      </div>
+      ${invites.length ? `<ul class="list">${invites.map((i) => `<li><span>${esc(i.note || 'Invite')}<div class="sub">${fmtDate(i.createdAt)}</div></span><span class="badge">${esc(state_(i))}</span></li>`).join('')}</ul>` : ''}
+    </section>
+    ${can_accept ? `<section class="card narrow"><div class="card-h"><h2>Got an invite?</h2></div><div class="card-b stack">
+      <p class="dim small">New accounts can accept one invite.</p>
+      <form id="acc-form" class="stack"><label class="f">Invite code<input name="code" class="mono" value="${esc(q.get('code') ?? '')}" placeholder="INV-XXXX-XXXX-XXXX" required></label><button type="submit">Accept</button></form>
+    </div></section>` : ''}
+  </div>`;
+  return {
+    html,
+    bind() {
+      document.getElementById('inv-form').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const { invite } = await post('/invites', formData(e.target));
+          document.getElementById('inv-link').innerHTML = `<p class="dim small">Send this link. It is shown only once.</p><p class="mono small" style="word-break:break-all">${esc(invite.url)}</p>`;
+          e.target.reset();
+        } catch (err) {
+          toast(err.message, true);
+        }
+      };
+      const acc = document.getElementById('acc-form');
+      if (acc) acc.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const r = await post('/invites/accept', formData(e.target));
+          toast(`Invite accepted: ${r.days} days added to your balance`);
+          go('/app/invites');
+        } catch (err) {
+          toast(err.message, true);
+        }
+      };
     },
   };
 }
