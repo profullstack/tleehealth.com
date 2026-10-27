@@ -4,6 +4,7 @@
  */
 import { createInterface } from 'node:readline';
 import {
+  call, resolveOrg,
   caseload, connect, dashboardDay, health, logTime, providers, recordItem, recordItems, records, resolveAuth, schedule, superbill,
   syncConnection,
 } from '@profullstack/tleehealth/client';
@@ -129,6 +130,27 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { connection: { type: 'string' } }, additionalProperties: false },
   },
   {
+    name: 'redeem_credit_code',
+    description:
+      "Redeem a tleehealth credit code (CR-XXXX-XXXX-XXXX-XXXX) for days of a practice's paid plan. With org (or by default your first practice you administer) the days go onto that practice; keep=true puts them in your balance.",
+    inputSchema: {
+      type: 'object',
+      properties: { code: { type: 'string' }, org: { type: 'string', description: 'practice id' }, keep: { type: 'boolean' } },
+      required: ['code'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_credits',
+    description: "Your balance of pro_days (days of a practice's paid plan from codes and invites) and its history.",
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'create_invite',
+    description: 'Make an invite link (3 per account). When someone new signs up with it you both get days of the paid plan. The link is shown once.',
+    inputSchema: { type: 'object', properties: { note: { type: 'string' } }, additionalProperties: false },
+  },
+  {
     name: 'api_health',
     description: 'Whether the tleehealth API is up, and its version.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -171,6 +193,18 @@ async function callTool(name, args) {
       for (const id of ids) out.push({ connection: id, ...(await syncConnection(auth, id, { wait: true })) });
       return textResult(out);
     }
+    case 'redeem_credit_code': {
+      const org = args.keep ? undefined : await resolveOrg(auth, args.org).catch(() => undefined);
+      return textResult(await call(auth, '/api/v1/credits/redeem', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: args.code, ...(org ? { org_id: org } : {}) }),
+      }));
+    }
+    case 'get_credits':
+      return textResult(await call(auth, '/api/v1/credits'));
+    case 'create_invite':
+      return textResult(await call(auth, '/api/v1/invites', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note: args.note }),
+      }));
     case 'api_health':
       return textResult(await health(auth));
     default:

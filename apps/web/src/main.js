@@ -5,6 +5,7 @@ import { app } from './app.js';
 import { startScheduler } from './calls.js';
 import { enabled as callingEnabled } from './telnyx.js';
 import { config } from './config.js';
+import { warm as warmCredits } from './credits.js';
 
 // Production never runs without its database; the deploy's health check then
 // fails loudly instead of serving a site that cannot store anything.
@@ -16,6 +17,8 @@ if (configured()) {
   await migrate();
   // The coinpay object goes in whole: its getters read the environment on each access.
   configurePayments({ sql: db(), coinpay: config.coinpay, siteUrl: config.siteUrl });
+  // The credit-code and invite tables, created before the first request needs them.
+  await warmCredits();
   // The AI-call dialler: every minute, inside each practice's calling hours.
   if (process.env.CALLS_SCHEDULER !== 'off') startScheduler();
 }

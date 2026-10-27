@@ -9,6 +9,8 @@ import { createCrawlGate } from './crawl-gate.js';
 import { api, coinpayWebhook, saveSignup } from './api.js';
 import { withPitFooter } from './pit-footer.js';
 import * as auth from './auth.js';
+import { config } from './config.js';
+import * as credits from './credits.js';
 import * as calls from './calls.js';
 import * as records from './records.js';
 import * as telnyx from './telnyx.js';
@@ -88,9 +90,43 @@ app.get('/auth/magic', async (c) => {
   const s = token ? await auth.consumeLoginLink(token, { userAgent: c.req.header('user-agent') }) : null;
   if (!s) return c.redirect('/signin?error=expired', 302);
   await saveSignup(s.user, s.profile);
+  // The link proved the mailbox; a link that just created the account takes its invite.
+  let to = '/app';
+  if (s.created && s.invite) {
+    try {
+      const r = await credits.acceptInvite(s.user.id, s.invite);
+      console.log(`[invite] ${s.user.id} ${r.ok ? 'accepted' : r.reason}`);
+      if (r.ok) to = '/app/invites?joined=1';
+    } catch (err) {
+      console.error(`[invite] accept failed: ${err?.message ?? err}`);
+    }
+  }
   c.header('set-cookie', auth.sessionCookie(s.sessionId));
-  return c.redirect('/app', 302);
+  if (s.invite) c.header('set-cookie', `${credits.INVITE_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`, { append: true });
+  return c.redirect(to, 302);
 });
+
+// An invite link: keep the code (cookie + the signup link) and send them to sign up.
+app.get('/i/:code', async (c) => {
+  const code = credits.cleanInvite(c.req.param('code'));
+  if (!code) return c.redirect('/signup', 302);
+  c.header(
+    'set-cookie',
+    `${credits.INVITE_COOKIE}=${code}; Path=/; Max-Age=${30 * 86400}; HttpOnly; SameSite=Lax${config.isProd ? '; Secure' : ''}`,
+  );
+  const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+  return c.html(
+    await withPitFooter(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>You're invited to tleehealth</title><meta name="robots" content="noindex"><link rel="stylesheet" href="/assets/app.css"><link rel="icon" href="/icon.svg"></head>
+<body><div class="center"><div class="auth"><h1>You're invited to tleehealth</h1>
+<p class="muted">Scheduling, prescriptions, labs and AI follow-up calls for your practice. Join with this invite and you both get ${credits.INVITE_BONUS_DAYS} days of the paid plan, on top of the 14-day trial.</p>
+<p class="mono small">${esc(code)}</p>
+<p><a class="btn primary" href="/signup?invite=${encodeURIComponent(code)}">Create your account</a></p>
+<p class="dim small">Already have an account? <a href="/app/invites?code=${encodeURIComponent(code)}">Sign in</a>; invites count for accounts in their first ${credits.INVITEE_MAX_AGE_DAYS} days.</p>
+</div></div></body></html>`),
+  );
+});
+app.get('/invites', (c) => c.redirect('/app/invites', 302));
 
 // The provider (MyChart or any SMART on FHIR portal) sends the patient back here
 // after they sign in there and allow access. The import starts right away.
@@ -224,6 +260,8 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - GET /orgs/:org/patients/:id/records       what that patient shared with the practice (audit-logged)
 - GET|PUT /orgs/:org/call-settings          AI calls: on/off, hours before/after, calling window, attempts
 - POST /orgs/:org/appointments/:id/call     call the patient now ({"kind":"reminder"|"followup"})
+- GET /credits, POST /credits/redeem {code, org_id?}, POST /orgs/:org/billing/apply-credits {days}   credit codes: days of a practice's paid plan
+- GET|POST /invites, POST /invites/accept {code}   invites: 3 per account, both sides get 7 days; landing page /i/<code>
 - GET /orgs/:org/calls/:id                  outcome, summary and transcript; POST .../resolve when handled
 - GET|PUT /orgs/:org/patients/:id/care-plan, POST .../care-plan/items, PATCH /orgs/:org/care-plan-items/:id
                                             goals and tasks with owners and due dates; shared plans show in the portal
