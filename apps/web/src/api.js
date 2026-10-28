@@ -1144,7 +1144,7 @@ api.get('/records/files/:id', async (c) => {
 api.post('/records/connect', async (c) => {
   const user = await requireUser(c);
   const b = await body(c);
-  const r = await records.start(user, { provider_id: str(b.provider_id, 200), fhir_base: str(b.fhir_base, 500), name: str(b.name, 200), return_to: b.return_to });
+  const r = await records.start(user, { provider_id: str(b.provider_id, 200), fhir_base: str(b.fhir_base, 500), name: str(b.name, 200), return_to: b.return_to, unlock_ttl: str(b.unlock_ttl, 10) || undefined });
   return c.json({ connection_id: r.connection.id, provider_name: r.connection.provider_name, authorize_url: r.authorize_url }, 201);
 });
 
@@ -1159,15 +1159,28 @@ api.post('/records/connections/:id/sync', async (c) => {
   const user = await requireUser(c);
   const conn = await records.connectionFor(user.id, uuid(c.req.param('id'), 'connection'));
   if (['pending', 'expired', 'revoked'].includes(conn.status)) fail(409, `${conn.provider_name}: reconnect first`);
+  if (!records.isUnlocked(conn.id)) {
+    await records.sync(conn.id); // marks it locked
+    fail(423, `${conn.provider_name}: locked; reconnect to resume importing`);
+  }
   if (c.req.query('wait')) return c.json(await records.sync(conn.id));
   records.syncInBackground(conn.id);
   return c.json({ ok: true, started: true }, 202);
+});
+
+// Lock: drop the in-memory key now; importing pauses until the patient reconnects.
+api.post('/records/connections/:id/lock', async (c) => {
+  const user = await requireUser(c);
+  const conn = await records.connectionFor(user.id, uuid(c.req.param('id'), 'connection'));
+  await records.lockConnection(conn);
+  return c.json({ ok: true, locked: true });
 });
 
 // Disconnecting deletes the tokens AND everything imported through them.
 api.delete('/records/connections/:id', async (c) => {
   const user = await requireUser(c);
   const conn = await records.connectionFor(user.id, uuid(c.req.param('id'), 'connection'));
+  records.dropKey(conn.id);
   await db()`delete from health_connections where id = ${conn.id}`;
   return c.json({ ok: true });
 });

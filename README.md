@@ -12,7 +12,7 @@ SMART on FHIR patient portal, at `/portal/records` (or `tleehealth connect`). We
 everything that API returns, including personal information, visits, after-visit summaries,
 notes, labs, imaging, medications, conditions, allergies, immunizations, procedures and the
 attached PDFs and images. The patient can download all of it as one zip or FHIR bundle, and
-share a connection with a practice. Tokens are sealed with `HEALTH_TOKEN_KEY` (vault).
+share a connection with a practice. Tokens are sealed under a per-connection key held only in process memory while the patient's unlock lasts (default 8h, `unlock_ttl` up to 7d; `POST /api/v1/records/connections/:id/lock`); a restart pauses imports with status `locked` until the patient reconnects. `HEALTH_TOKEN_KEY` is no longer read. `CLIENT_JWT_PRIVATE_KEY` is tleehealth's own app signing key for Epic (not a user secret).
 MyChart needs `EPIC_CLIENT_ID` from an app registered at fhir.epic.com; until then only
 the demo sandbox (and servers configured with `SMART_CLIENT_ID`) can connect.
 

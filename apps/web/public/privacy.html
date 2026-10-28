@@ -30,7 +30,7 @@
   <li>visits, after-visit summaries, clinical notes, lab results, imaging reports, medications, conditions, allergies, immunizations, procedures, care plans and insurance coverage;</li>
   <li>files attached to those records, such as PDFs and images.</li>
 </ul>
-<p>We use these records only to show them to you, to let you download them, and to share them with a practice <strong>when you choose to</strong>. Access is read-only: we never write to your provider's records. The access tokens your provider issues are encrypted at rest (AES-256-GCM).</p>
+<p>We use these records only to show them to you, to let you download them, and to share them with a practice <strong>when you choose to</strong>. Access is read-only: we never write to your provider's records. The access tokens your provider issues are sealed (AES-256-GCM) with a key we keep only in our server's memory while your import is unlocked, never on disk: after a restart, when the time you chose runs out, or when you press Lock, importing pauses until you reconnect.</p>
 <p><strong>Your control:</strong> you can download everything at any time (a ZIP of readable files plus the raw data, or a single FHIR file). You can share a connection with a practice and stop sharing it at any time. Disconnecting a provider deletes its tokens and every record and file imported through it from our systems. Your provider keeps its own copy.</p>
 
 <h2>Information practices on tleehealth</h2>
@@ -55,7 +55,7 @@
 <p>Data is stored on servers we operate in the United States. Imported records stay until you disconnect the provider or delete your account. Practice records are kept while the practice uses tleehealth and as the practice's own record-keeping obligations require. Email <a href="mailto:privacy@tleehealth.com">privacy@tleehealth.com</a> to delete your account and everything tied to it.</p>
 
 <h2>Security</h2>
-<p>All traffic uses HTTPS. Provider tokens are encrypted at rest. Records are visible only to you and to practices you share them with. A practice's staff see their practice's charts according to their role. Server-side fetches to a provider address you enter are restricted to public HTTPS endpoints, and tokens are sent only to that provider's own server.</p>
+<p>All traffic uses HTTPS. Provider tokens are sealed at rest with a key that is never stored. Records are visible only to you and to practices you share them with. A practice's staff see their practice's charts according to their role. Server-side fetches to a provider address you enter are restricted to public HTTPS endpoints, and tokens are sent only to that provider's own server.</p>
 
 <h2>Changes and contact</h2>
 <p>If we change this policy we will update the date above and, for material changes, notify account holders by email. Questions: <a href="mailto:privacy@tleehealth.com">privacy@tleehealth.com</a>.</p>

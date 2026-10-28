@@ -1493,7 +1493,7 @@ function portalHead(path) {
 /* -------------------------------------------------------- health records -- */
 // Records imported from other providers (MyChart and any SMART on FHIR portal).
 
-const CONN_BADGE = { active: 'b-ok', syncing: 'b-info', error: 'b-alert', expired: 'b-warn', revoked: '' };
+const CONN_BADGE = { active: 'b-ok', syncing: 'b-info', error: 'b-alert', expired: 'b-warn', locked: 'b-warn', revoked: '' };
 const fmtSize = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 let recordsPoll = null;
 const ACCESS_LABEL = { 'records.read': 'viewed', 'records.file': 'opened a file', 'records.export': 'downloaded everything', 'records.share': 'shared', 'records.unshare': 'stopped sharing' };
@@ -1541,9 +1541,11 @@ async function renderRecords(q) {
             <div class="sub">${c.records} records · ${c.files} files${c.last_synced_at ? ` · imported ${fmtDate(c.last_synced_at)} ${fmtTime(c.last_synced_at)}` : ''}</div></span>
           <span class="row" style="gap:6px">
             ${['active', 'error'].includes(c.status) ? `<button class="sm" data-sync="${c.id}">Import again</button>` : ''}
-            ${['expired', 'error', 'revoked'].includes(c.status) ? `<button class="sm primary" data-reconnect="${esc(c.fhir_base)}" data-name="${esc(c.provider_name)}">Reconnect</button>` : ''}
+            ${c.status === 'active' && c.unlocked_until ? `<button class="sm" data-lock="${c.id}" title="Import can run until ${esc(fmtDate(c.unlocked_until))} ${esc(fmtTime(c.unlocked_until))}">Lock</button>` : ''}
+            ${['expired', 'error', 'revoked', 'locked'].includes(c.status) ? `<button class="sm primary" data-reconnect="${esc(c.fhir_base)}" data-name="${esc(c.provider_name)}">Reconnect</button>` : ''}
             <a class="btn sm" href="/api/v1/records/export?connection=${c.id}">Download</a>
             <button class="sm danger" data-disconnect="${c.id}" data-name="${esc(c.provider_name)}">Disconnect</button></span></div>
+          ${c.status === 'locked' ? '<div class="small dim">Locked: your sign-in to this provider is sealed with a key we keep only in memory, so importing pauses after a restart or when your chosen time runs out. Reconnect to resume.</div>' : ''}
           ${c.last_error ? `<details class="small dim"><summary>${c.status === 'active' ? 'Some parts could not be read' : 'What went wrong'}</summary><pre style="white-space:pre-wrap">${esc(c.last_error)}</pre></details>` : ''}
           ${data.practices.length ? `<div class="row small" style="gap:14px">${data.practices
             .map((p) => {
@@ -1616,6 +1618,7 @@ async function renderRecords(q) {
     startConnect(formData(ff)).catch((err) => (ff.querySelector('.err').textContent = err.message));
   };
   root.querySelectorAll('[data-sync]').forEach((b) => (b.onclick = () => act(() => post(`/records/connections/${b.dataset.sync}/sync`), 'Importing…')));
+  root.querySelectorAll('[data-lock]').forEach((b) => (b.onclick = () => act(() => post(`/records/connections/${b.dataset.lock}/lock`), 'Locked')));
   root.querySelectorAll('[data-reconnect]').forEach((b) => (b.onclick = () => startConnect({ fhir_base: b.dataset.reconnect, name: b.dataset.name }).catch((err) => toast(err.message, true))));
   root.querySelectorAll('[data-disconnect]').forEach(
     (b) =>
