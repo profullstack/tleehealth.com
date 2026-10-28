@@ -1,9 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, randomBytes, randomUUID, sign } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, randomBytes, randomUUID, sign } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { db } from '@tleehealth/db';
 import { config } from './config.js';
 import { zip } from './zip.js';
+import * as vault from './token-vault.js';
 
 /**
  * Health-record import: "SimpleFIN for health".
@@ -19,7 +20,8 @@ import { zip } from './zip.js';
  *
  * The flow is the SMART App Launch "standalone patient launch":
  *   start()   discovery (.well-known/smart-configuration), PKCE, authorize URL
- *   finish()  the redirect back: code -> tokens (sealed with AES-256-GCM)
+ *   finish()  the redirect back: code -> tokens, sealed under an in-memory key
+ *             (token-vault.js): connecting is the unlock, restart/TTL/Lock pauses
  *   sync()    every resource type, every page, then the attachments
  */
 
@@ -32,28 +34,12 @@ const FETCH_TIMEOUT_MS = 30_000;
 
 /* ----------------------------------------------------------- token sealing -- */
 
-const DEV_KEY = 'tleehealth-dev-only-records-key';
-function key() {
-  const k = process.env.HEALTH_TOKEN_KEY;
-  if (!k && config.isProd) throw new Error('HEALTH_TOKEN_KEY is not set');
-  return createHash('sha256').update(k || DEV_KEY).digest();
-}
-
-export function seal(text) {
-  if (text == null) return null;
-  const iv = randomBytes(12);
-  const c = createCipheriv('aes-256-gcm', key(), iv);
-  const body = Buffer.concat([c.update(String(text), 'utf8'), c.final()]);
-  return Buffer.concat([iv, c.getAuthTag(), body]);
-}
-
-export function unseal(buf) {
-  if (!buf) return null;
-  const b = Buffer.from(buf);
-  const d = createDecipheriv('aes-256-gcm', key(), b.subarray(0, 12));
-  d.setAuthTag(b.subarray(12, 28));
-  return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8');
-}
+// Until 2026-10-28 tokens were sealed with HEALTH_TOKEN_KEY (app env, with a
+// hard-coded dev fallback), so root on the host could open every patient's
+// portal login. They are now sealed under a per-connection key that only this
+// process holds while the patient's unlock lasts: see token-vault.js. The old
+// access_token / refresh_token columns are never read (prod had 0 rows) and a
+// DB trigger refuses new values.
 
 /* ---------------------------------------------------------------- URL guard -- */
 
@@ -223,7 +209,7 @@ function scopeFor(smart) {
  * Begin connecting: a provider from the directory (provider_id) or any SMART
  * server's FHIR address (fhir_base). Returns the URL to send the patient to.
  */
-export async function start(user, { provider_id, fhir_base, name, return_to } = {}) {
+export async function start(user, { provider_id, fhir_base, name, return_to, unlock_ttl } = {}) {
   let provider = null;
   if (provider_id) {
     provider = await providerById(String(provider_id));
@@ -250,9 +236,9 @@ export async function start(user, { provider_id, fhir_base, name, return_to } = 
   const state = randomBytes(24).toString('base64url');
   const verifier = randomBytes(32).toString('base64url');
   await sql`
-    insert into health_connect_states (state, user_id, connection_id, verifier, return_to, expires_at)
+    insert into health_connect_states (state, user_id, connection_id, verifier, return_to, expires_at, unlock_ttl)
     values (${state}, ${user.id}, ${conn.id}, ${verifier}, ${return_to === 'cli' ? 'cli' : 'portal'},
-            now() + make_interval(mins => ${STATE_TTL_MIN}))`;
+            now() + make_interval(mins => ${STATE_TTL_MIN}), ${vault.ttlSeconds(unlock_ttl)})`;
   await sql`delete from health_connect_states where expires_at < now()`;
   // Abandoned attempts: a pending connection nobody finished within a day.
   await sql`delete from health_connections where user_id = ${user.id} and status = 'pending' and created_at < now() - interval '1 day'`;
@@ -328,20 +314,34 @@ async function tokenRequest(conn, form) {
   return tok;
 }
 
-async function saveTokens(connId, tok, extra = {}) {
+/**
+ * Store tokens sealed under the connection's in-memory key. `fresh` = a new
+ * sign-in at the portal: a new key and a new unlock window (`ttl`).
+ */
+async function saveTokens(conn, tok, extra = {}) {
   const expires = tok.expires_in ? new Date(Date.now() + Number(tok.expires_in) * 1000) : null;
-  const [conn] = await db()`
+  const tokens = { access_token: tok.access_token, refresh_token: tok.refresh_token ?? extra.prevRefresh ?? null };
+  let blob;
+  if (extra.fresh) blob = (await vault.unlockWith(conn.id, conn.user_id, tokens, extra.ttl)).blob;
+  else {
+    blob = await vault.reseal(conn.id, conn.user_id, tokens);
+    if (!blob) fail(423, `${conn.provider_name}: locked; reconnect to import again`);
+  }
+  const sql = db();
+  const [next] = await sql`
     update health_connections set
-      access_token = ${seal(tok.access_token)},
-      refresh_token = coalesce(${tok.refresh_token ? seal(tok.refresh_token) : null}, refresh_token),
+      tokens_sealed = ${sql.json(blob)},
+      seal_version = 2,
+      access_token = null,
+      refresh_token = null,
       token_expires_at = ${expires},
       scope = coalesce(${tok.scope ?? null}, scope),
       patient_ref = coalesce(${extra.patient ?? null}, patient_ref),
       status = ${extra.status ?? 'active'},
       last_error = null,
       updated_at = now()
-    where id = ${connId} returning *`;
-  return conn;
+    where id = ${conn.id} returning *`;
+  return next;
 }
 
 /** The provider sent the patient back: trade the code for tokens. */
@@ -360,24 +360,37 @@ export async function finish({ state, code, error, error_description }) {
   try {
     const tok = await tokenRequest(conn, { grant_type: 'authorization_code', code: String(code), redirect_uri: redirectUri(), code_verifier: s.verifier });
     if (!tok.patient) fail(502, 'the provider did not say which patient record you opened');
-    return { connection: await saveTokens(conn.id, tok, { patient: tok.patient }), return_to: s.return_to };
+    return { connection: await saveTokens(conn, tok, { patient: tok.patient, fresh: true, ttl: vault.ttlSeconds(s.unlock_ttl) }), return_to: s.return_to };
   } catch (err) {
     await sql`update health_connections set status = 'error', last_error = ${err.message.slice(0, 300)}, updated_at = now() where id = ${conn.id}`;
     return { connection: conn, return_to: s.return_to, error: err.message };
   }
 }
 
-/** A live access token, refreshed when it is about to expire. */
+/** A live access token, refreshed when it is about to expire. 423 while the connection is locked. */
 async function accessToken(conn) {
+  const tokens = await vault.open(conn.id, conn.user_id, conn.tokens_sealed);
+  if (!tokens) fail(423, `${conn.provider_name}: locked; reconnect to import again`);
   const soon = conn.token_expires_at && new Date(conn.token_expires_at).getTime() < Date.now() + 60_000;
-  if (!soon) return { conn, token: unseal(conn.access_token) };
-  if (!conn.refresh_token) {
+  if (!soon) return { conn, token: tokens.access_token };
+  if (!tokens.refresh_token) {
     await db()`update health_connections set status = 'expired', last_error = 'access expired; reconnect to refresh', updated_at = now() where id = ${conn.id}`;
     fail(409, `${conn.provider_name}: access expired; reconnect to import again`);
   }
-  const tok = await tokenRequest(conn, { grant_type: 'refresh_token', refresh_token: unseal(conn.refresh_token) });
-  const next = await saveTokens(conn.id, tok, { status: 'syncing' });
+  const tok = await tokenRequest(conn, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
+  const next = await saveTokens(conn, tok, { status: 'syncing', prevRefresh: tokens.refresh_token });
   return { conn: next, token: tok.access_token };
+}
+
+export const isUnlocked = (connId) => vault.isUnlocked(connId);
+export const dropKey = (connId) => vault.lock(connId);
+
+/** Lock a connection now: its import pauses until the patient reconnects. */
+export async function lockConnection(conn) {
+  vault.lock(conn.id);
+  await db()`update health_connections set status = 'locked', tokens_sealed = null,
+    last_error = 'locked: reconnect to resume importing', updated_at = now()
+    where id = ${conn.id} and status <> 'pending'`;
 }
 
 /* -------------------------------------------------------------- classifying -- */
@@ -559,7 +572,7 @@ function fhirClient(conn0) {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (!token || attempt) ({ conn, token } = await accessToken(attempt ? { ...conn, token_expires_at: new Date(0) } : conn));
       const res = await timedFetch(url, { headers: { authorization: `Bearer ${token}`, accept } });
-      if (res.status === 401 && !attempt && conn.refresh_token) continue;
+      if (res.status === 401 && !attempt) continue;
       return res;
     }
   }
@@ -720,11 +733,18 @@ async function resolveMedications(client, conn, errors) {
  */
 export async function sync(connectionId) {
   const sql = db();
+  // Locked (restart, TTL or Lock): pause with a clear status, never crash.
+  if (!vault.isUnlocked(connectionId)) {
+    const [locked] = await sql`
+      update health_connections set status = 'locked', last_error = 'locked: reconnect to resume importing', updated_at = now()
+      where id = ${connectionId} and status in ('active', 'error', 'syncing', 'locked') returning id`;
+    return locked ? { locked: true } : { skipped: true };
+  }
   const [conn] = await sql`
     update health_connections set status = 'syncing', updated_at = now()
     where id = ${connectionId} and status in ('active', 'error', 'syncing')
       and (status <> 'syncing' or updated_at < now() - interval '15 minutes')
-      and access_token is not null
+      and tokens_sealed is not null
     returning *`;
   if (!conn) return { skipped: true };
   const errors = [];
@@ -764,8 +784,9 @@ export async function sync(connectionId) {
     return { counts, files, errors };
   } catch (err) {
     const expired = err instanceof RecordsError && err.status === 409;
+    const locked = err instanceof RecordsError && err.status === 423;
     await sql`
-      update health_connections set status = ${expired ? 'expired' : 'error'}, last_error = ${err.message.slice(0, 500)}, updated_at = now()
+      update health_connections set status = ${locked ? 'locked' : expired ? 'expired' : 'error'}, last_error = ${err.message.slice(0, 500)}, updated_at = now()
       where id = ${conn.id}`;
     return { counts, files, errors: [...errors, err.message], failed: true };
   }
@@ -791,6 +812,12 @@ export async function connections(userId) {
     ? await sql`select s.connection_id, s.org_id, o.name as org_name, s.shared_at from health_connection_shares s
                 join organizations o on o.id = s.org_id where s.connection_id = any(${rows.map((r) => r.id)})`
     : [];
+  for (const r of rows) {
+    const u = vault.status(r.id);
+    r.locked = !u.unlocked && r.status !== 'pending';
+    r.unlocked_until = u.expiresAt;
+    if (r.locked && ['active', 'syncing'].includes(r.status)) r.status = 'locked';
+  }
   for (const r of rows) r.shared_with = shares.filter((s) => s.connection_id === r.id).map(({ org_id, org_name, shared_at }) => ({ org_id, org_name, shared_at }));
   return rows;
 }

@@ -6,13 +6,42 @@ import { createHash } from 'node:crypto';
 import { configured, close } from '../packages/db/src/index.js';
 import { migrate } from '../packages/db/src/migrate.js';
 import * as records from '../apps/web/src/records.js';
+import * as vault from '../apps/web/src/token-vault.js';
+const { UnlockStore } = vault;
 import { crc32, zip } from '../apps/web/src/zip.js';
 
 describe('records units', () => {
-  test('seal and unseal round-trip, and sealing is randomized', () => {
-    const a = records.seal('secret-token');
-    expect(records.unseal(a)).toBe('secret-token');
-    expect(Buffer.compare(a, records.seal('secret-token'))).not.toBe(0);
+  test('portal tokens open only with the in-memory key; TTL, Lock and a restart lock them', async () => {
+    let now = 1_000_000;
+    vault._useSessions(new UnlockStore({ now: () => now, useTimers: false }));
+    try {
+      const prev = process.env.HEALTH_TOKEN_KEY;
+      delete process.env.HEALTH_TOKEN_KEY; // no server key involved at all
+      const { blob, status } = await vault.unlockWith('conn-1', 'user-1', { access_token: 'at-1', refresh_token: 'rt-1' }, 3600);
+      expect(status.unlocked).toBe(true);
+      expect(JSON.stringify(blob)).not.toContain('at-1');
+      expect(await vault.open('conn-1', 'user-1', blob)).toEqual({ access_token: 'at-1', refresh_token: 'rt-1' });
+      // Bound to the user and the connection.
+      await expect(vault.open('conn-1', 'user-2', blob)).rejects.toThrow();
+      now += 3601_000;
+      expect(await vault.open('conn-1', 'user-1', blob)).toBeNull();
+      await vault.unlockWith('conn-1', 'user-1', { access_token: 'at-2' });
+      expect(vault.status('conn-1').expiresAt).toBe(new Date(now + vault.DEFAULT_UNLOCK_TTL_SECONDS * 1000).toISOString());
+      vault.lock('conn-1');
+      expect(vault.isUnlocked('conn-1')).toBe(false);
+      // A restart is a fresh, empty store.
+      const again = await vault.unlockWith('conn-2', 'user-1', { access_token: 'x' });
+      vault._useSessions(new UnlockStore({ useTimers: false }));
+      expect(await vault.open('conn-2', 'user-1', again.blob)).toBeNull();
+      if (prev !== undefined) process.env.HEALTH_TOKEN_KEY = prev;
+    } finally {
+      vault._useSessions(null);
+    }
+  });
+
+  test('the old server-key sealing is gone', () => {
+    expect(records.seal).toBeUndefined();
+    expect(records.unseal).toBeUndefined();
   });
 
   test('crc32 matches the known check value', () => {
@@ -368,6 +397,39 @@ describe.skipIf(!configured())('records api', () => {
     const conn = (await patient('GET', `/records/connections/${connId}`)).body.connection;
     expect(conn.records).toBe(16);
     expect(conn.files).toBe(4);
+  });
+
+  test('tokens at rest are ciphertext only; a restart locks the import until the patient reconnects', async () => {
+    const { db } = await import('../packages/db/src/index.js');
+    const [row] = await db()`select access_token, refresh_token, tokens_sealed, seal_version from health_connections where id = ${connId}`;
+    expect(row.access_token).toBeNull();
+    expect(row.refresh_token).toBeNull();
+    expect(row.seal_version).toBe(2);
+    expect(JSON.stringify(row.tokens_sealed)).not.toContain('tok-');
+    await expect(db()`update health_connections set refresh_token = ${Buffer.from('x')} where id = ${connId}`).rejects.toThrow('legacy');
+
+    // Simulate a restart: the in-memory keys are gone.
+    vault._useSessions(new UnlockStore({ useTimers: false }));
+    try {
+      const r = await patient('POST', `/records/connections/${connId}/sync`);
+      expect(r.status).toBe(423);
+      expect(r.body.error).toContain('locked');
+      const conn = (await patient('GET', `/records/connections/${connId}`)).body.connection;
+      expect(conn).toMatchObject({ status: 'locked', locked: true });
+
+      // Reconnecting is the unlock.
+      const start = await patient('POST', '/records/connect', { fhir_base: fhir.base, name: 'Lin Clinic MyChart', unlock_ttl: '1h' });
+      const back = new URL((await fetch(new URL(start.body.authorize_url), { redirect: 'manual' })).headers.get('location'));
+      await app.request(`/connect/callback${back.search}`);
+      const fresh = start.body.connection_id;
+      expect(vault.isUnlocked(fresh)).toBe(true);
+      expect(new Date(vault.status(fresh).expiresAt).getTime() - Date.now()).toBeLessThanOrEqual(3600_000);
+      expect((await patient('POST', `/records/connections/${fresh}/lock`)).status).toBe(200);
+      expect((await patient('POST', `/records/connections/${fresh}/sync`)).status).toBe(423);
+      await patient('DELETE', `/records/connections/${fresh}`);
+    } finally {
+      vault._useSessions(null);
+    }
   });
 
   test('disconnecting deletes the connection and everything it imported', async () => {
