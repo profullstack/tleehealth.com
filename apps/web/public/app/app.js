@@ -1562,6 +1562,11 @@ async function renderRecords(q) {
     <h1>Your health records</h1>
     ${q.get('error') ? `<section class="card"><div class="card-b"><span class="badge b-alert">not connected</span> ${esc(q.get('error'))}</div></section>` : ''}
     <section class="card"><div class="card-h"><h2>Connected providers</h2>${data.total ? `<span class="row" style="gap:6px"><a class="btn sm primary" href="/api/v1/records/export">Download everything</a><a class="btn sm" href="/api/v1/records/export?format=bundle" title="One HL7 FHIR file other health apps can import">FHIR</a></span>` : ''}</div>${connections}</section>
+    <section class="card"><div class="card-h"><h2>Find your provider</h2></div><div class="card-b stack">
+      <p class="dim small" style="margin:0">Find your MyChart or health system here, then download your records from its portal and import them below. Automatic connections are paused while we finish provider approvals.</p>
+      <input id="prov-q" placeholder="Search: OCHIN, hospital, or clinic" autocomplete="off" aria-label="Search providers">
+      <ul class="list" id="prov-list" style="padding:0"></ul>
+    </div></section>
     <section class="card"><div class="card-h"><h2>Import a MyChart download</h2></div><div class="card-b stack">
       <p class="dim small" style="margin:0">Download a PDF, CCD/C-CDA, ZIP, lab report, or MRI/DICOM file from MyChart, then upload it here. Manual import is the current connection method.</p>
       <form id="manual-import" class="row" style="align-items:end;gap:10px"><label class="f" style="flex:1">Files<input type="file" name="files" multiple accept=".pdf,.json,.xml,.txt,.csv,.zip,.dcm,application/pdf,application/json,application/xml,text/plain,application/zip,application/dicom"></label><button class="btn primary" type="submit">Import files</button></form>
@@ -1583,6 +1588,18 @@ async function renderRecords(q) {
     history.replaceState({}, '', '/portal/records');
   }
   if (syncing) recordsPoll = setTimeout(() => location.pathname === '/portal/records' && render(), 3000);
+
+  const list = document.getElementById('prov-list');
+  const search = async (term) => {
+    const { providers } = await get(`/records/providers?q=${encodeURIComponent(term)}`);
+    list.innerHTML = providers.length
+      ? providers.slice(0, 12).map((p) => `<li><span>${esc(p.name)}<div class="sub">${p.vendor === 'epic' ? 'MyChart' : p.vendor === 'sandbox' ? 'demo' : 'FHIR portal'}</div></span><span class="badge">manual import</span></li>`).join('')
+      : '<li class="dim small">No provider found yet. Search one word of the organization name.</li>';
+  };
+  let t;
+  const qi = document.getElementById('prov-q');
+  qi.oninput = () => { clearTimeout(t); t = setTimeout(() => search(qi.value.trim()).catch(() => {}), 250); };
+  search('OCHIN').catch(() => {});
 
   root.querySelectorAll('[data-sync]').forEach((b) => (b.onclick = () => act(() => post(`/records/connections/${b.dataset.sync}/sync`), 'Importing…')));
   root.querySelector('#manual-import')?.addEventListener('submit', async (e) => {
