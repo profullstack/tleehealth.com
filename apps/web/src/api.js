@@ -1150,10 +1150,7 @@ api.post('/records/import', async (c) => {
 });
 
 api.post('/records/connect', async (c) => {
-  const user = await requireUser(c);
-  const b = await body(c);
-  const r = await records.start(user, { provider_id: str(b.provider_id, 200), fhir_base: str(b.fhir_base, 500), name: str(b.name, 200), return_to: b.return_to, unlock_ttl: str(b.unlock_ttl, 10) || undefined });
-  return c.json({ connection_id: r.connection.id, provider_name: r.connection.provider_name, authorize_url: r.authorize_url }, 201);
+  return c.json({ error: 'provider connections are paused; use manual record import' }, 410);
 });
 
 api.get('/records/connections/:id', async (c) => {

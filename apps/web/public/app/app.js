@@ -1562,19 +1562,8 @@ async function renderRecords(q) {
     <h1>Your health records</h1>
     ${q.get('error') ? `<section class="card"><div class="card-b"><span class="badge b-alert">not connected</span> ${esc(q.get('error'))}</div></section>` : ''}
     <section class="card"><div class="card-h"><h2>Connected providers</h2>${data.total ? `<span class="row" style="gap:6px"><a class="btn sm primary" href="/api/v1/records/export">Download everything</a><a class="btn sm" href="/api/v1/records/export?format=bundle" title="One HL7 FHIR file other health apps can import">FHIR</a></span>` : ''}</div>${connections}</section>
-    <section class="card"><div class="card-h"><h2>Connect a provider</h2></div><div class="card-b stack">
-      <p class="dim small" style="margin:0">MyChart is rolling out: each health system turns tleehealth on as its Epic system picks it up. If your provider's sign-in page shows an "OAuth2 Error", it hasn't yet; try again in a day or two.</p>
-      <input id="prov-q" placeholder="Search: your hospital or clinic (MyChart)" autocomplete="off" aria-label="Search providers">
-      <ul class="list" id="prov-list" style="padding:0"></ul>
-      <details><summary class="small">Not listed? Connect any patient portal by its FHIR address</summary>
-        <form id="fhir-form" class="stack" style="margin-top:10px">
-          <label class="f">FHIR address<input name="fhir_base" required placeholder="https://fhir.example.org/api/FHIR/R4"></label>
-          <label class="f">Name<input name="name" placeholder="Example Health"></label>
-          <button type="submit">Connect</button><p class="err"></p></form></details>
-      <p class="dim small">You sign in on your provider's own site and choose what to share; we never see your password. We copy your personal information, visits, after-visit summaries, notes, lab results, imaging, medications, conditions, allergies, immunizations, procedures and the files attached to them. Disconnecting deletes all of it here. <a href="/privacy">Privacy policy</a>.</p>
-    </div></section>
     <section class="card"><div class="card-h"><h2>Import a MyChart download</h2></div><div class="card-b stack">
-      <p class="dim small" style="margin:0">Download a PDF, CCD/C-CDA, ZIP, lab report, or MRI/DICOM file from MyChart, then upload it here. This works now without OAuth.</p>
+      <p class="dim small" style="margin:0">Download a PDF, CCD/C-CDA, ZIP, lab report, or MRI/DICOM file from MyChart, then upload it here. Manual import is the current connection method.</p>
       <form id="manual-import" class="row" style="align-items:end;gap:10px"><label class="f" style="flex:1">Files<input type="file" name="files" multiple accept=".pdf,.json,.xml,.txt,.csv,.zip,.dcm,application/pdf,application/json,application/xml,text/plain,application/zip,application/dicom"></label><button class="btn primary" type="submit">Import files</button></form>
       <p class="err" id="manual-import-error"></p>
     </div></section>
@@ -1595,33 +1584,6 @@ async function renderRecords(q) {
   }
   if (syncing) recordsPoll = setTimeout(() => location.pathname === '/portal/records' && render(), 3000);
 
-  const startConnect = async (payload) => {
-    const r = await post('/records/connect', payload);
-    location.href = r.authorize_url;
-  };
-  const list = document.getElementById('prov-list');
-  const search = async (term) => {
-    const { providers } = await get(`/records/providers?q=${encodeURIComponent(term)}`);
-    list.innerHTML = providers.length
-      ? providers
-          .slice(0, 12)
-          .map((p) => `<li><span>${esc(p.name)}<div class="sub">${p.vendor === 'epic' ? 'MyChart' : p.vendor === 'sandbox' ? 'try it with a made-up patient' : ''}</div></span>${p.ready ? `<button class="sm primary" data-connect="${esc(p.id)}">Connect</button>` : '<span class="badge">coming soon</span>'}</li>`)
-          .join('')
-      : '<li class="dim small">No match. Try one word of the name, or use its FHIR address below.</li>';
-    list.querySelectorAll('[data-connect]').forEach((b) => (b.onclick = () => startConnect({ provider_id: b.dataset.connect }).catch((err) => toast(err.message, true))));
-  };
-  let t;
-  const qi = document.getElementById('prov-q');
-  qi.oninput = () => {
-    clearTimeout(t);
-    t = setTimeout(() => search(qi.value.trim()).catch((err) => toast(err.message, true)), 250);
-  };
-  search('').catch(() => {});
-  const ff = document.getElementById('fhir-form');
-  ff.onsubmit = (e) => {
-    e.preventDefault();
-    startConnect(formData(ff)).catch((err) => (ff.querySelector('.err').textContent = err.message));
-  };
   root.querySelectorAll('[data-sync]').forEach((b) => (b.onclick = () => act(() => post(`/records/connections/${b.dataset.sync}/sync`), 'Importing…')));
   root.querySelector('#manual-import')?.addEventListener('submit', async (e) => {
     e.preventDefault();
