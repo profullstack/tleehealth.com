@@ -31,6 +31,8 @@ const MAX_PAGES = 50; // per search: 5,000 resources of one kind
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_FILES_PER_SYNC = 2000;
 const FETCH_TIMEOUT_MS = 30_000;
+const MAX_MANUAL_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_MANUAL_TOTAL_BYTES = 300 * 1024 * 1024;
 
 /* ----------------------------------------------------------- token sealing -- */
 
@@ -681,6 +683,50 @@ async function storeFile(sql, conn, recordId, url, att, bytes, type) {
     values (${recordId}, ${conn.id}, ${conn.user_id}, ${url}, ${att.title?.slice(0, 200) ?? null}, ${type ?? null}, ${bytes.length}, ${sha}, ${bytes})
     on conflict (record_id, source_url) do nothing returning id`;
   return r.length > 0;
+}
+
+const MANUAL_BASE = 'manual://upload';
+const MANUAL_VENDOR = 'manual';
+const manualCategory = (name, type = '') => {
+  const s = `${name} ${type}`.toLowerCase();
+  if (/dicom|\.dcm\b|mri|magnetic|ct scan|radiology|x-?ray|ultrasound|mammo/.test(s)) return 'imaging';
+  if (/lab|laboratory|pathology|test.result|bloodwork/.test(s)) return 'labs';
+  if (/after.visit|discharge|summary|ccd|cda|continuity/.test(s)) return 'summaries';
+  if (/medication|prescription|pharmacy/.test(s)) return 'medications';
+  if (/note|clinical|progress/.test(s)) return 'notes';
+  return 'reports';
+};
+
+/** Import files a patient downloaded from a portal without provider OAuth. */
+export async function manualImport(user, uploads) {
+  const files = uploads.filter(Boolean);
+  if (!files.length) fail(400, 'choose at least one file');
+  const total = files.reduce((n, f) => n + Number(f.size || 0), 0);
+  if (files.some((f) => Number(f.size || 0) > MAX_MANUAL_FILE_BYTES)) fail(413, 'each upload must be 100 MB or smaller');
+  if (total > MAX_MANUAL_TOTAL_BYTES) fail(413, 'the combined upload must be 300 MB or smaller');
+  const sql = db();
+  let [conn] = await sql`select * from health_connections where user_id = ${user.id} and vendor = ${MANUAL_VENDOR} order by created_at limit 1`;
+  if (!conn) {
+    [conn] = await sql`
+      insert into health_connections (user_id, provider_name, vendor, fhir_base, status, last_synced_at)
+      values (${user.id}, 'MyChart manual upload', ${MANUAL_VENDOR}, ${MANUAL_BASE}, 'active', now())
+      returning *`;
+  }
+  let imported = 0;
+  let bytes = 0;
+  for (const file of files) {
+    const data = Buffer.from(await file.arrayBuffer());
+    const name = String(file.name || 'health-record').slice(0, 200);
+    const type = String(file.type || 'application/octet-stream').split(';')[0];
+    const category = manualCategory(name, type);
+    const resource = { resourceType: 'DocumentReference', id: randomUUID(), status: 'current', description: name, category: [{ text: category }], content: [{ attachment: { title: name, contentType: type, size: data.length } }] };
+    const recordId = await upsert(conn, resource);
+    await storeFile(sql, conn, recordId, `manual:${createHash('sha256').update(data).digest('hex')}`, { title: name, contentType: type }, data, type);
+    imported++;
+    bytes += data.length;
+  }
+  await sql`update health_connections set last_synced_at = now(), updated_at = now(), last_error = null where id = ${conn.id}`;
+  return { connection_id: conn.id, imported, bytes };
 }
 
 /**

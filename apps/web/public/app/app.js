@@ -1573,6 +1573,11 @@ async function renderRecords(q) {
           <button type="submit">Connect</button><p class="err"></p></form></details>
       <p class="dim small">You sign in on your provider's own site and choose what to share; we never see your password. We copy your personal information, visits, after-visit summaries, notes, lab results, imaging, medications, conditions, allergies, immunizations, procedures and the files attached to them. Disconnecting deletes all of it here. <a href="/privacy">Privacy policy</a>.</p>
     </div></section>
+    <section class="card"><div class="card-h"><h2>Import a MyChart download</h2></div><div class="card-b stack">
+      <p class="dim small" style="margin:0">Download a PDF, CCD/C-CDA, ZIP, lab report, or MRI/DICOM file from MyChart, then upload it here. This works now without OAuth.</p>
+      <form id="manual-import" class="row" style="align-items:end;gap:10px"><label class="f" style="flex:1">Files<input type="file" name="files" multiple accept=".pdf,.json,.xml,.txt,.csv,.zip,.dcm,application/pdf,application/json,application/xml,text/plain,application/zip,application/dicom"></label><button class="btn primary" type="submit">Import files</button></form>
+      <p class="err" id="manual-import-error"></p>
+    </div></section>
     ${access.length ? `<section class="card"><div class="card-h"><h2>Who has seen your shared records</h2></div><ul class="list">${access
       .slice(0, 50)
       .map((a) => `<li><span>${esc(a.org_name)}<div class="sub">${esc(a.you ? 'You' : (a.who ?? ''))}</div></span><span class="dim small">${esc(ACCESS_LABEL[a.action] ?? a.action)} · ${fmtDate(a.at)} ${fmtTime(a.at)}</span></li>`)
@@ -1618,6 +1623,28 @@ async function renderRecords(q) {
     startConnect(formData(ff)).catch((err) => (ff.querySelector('.err').textContent = err.message));
   };
   root.querySelectorAll('[data-sync]').forEach((b) => (b.onclick = () => act(() => post(`/records/connections/${b.dataset.sync}/sync`), 'Importing…')));
+  root.querySelector('#manual-import')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const button = form.querySelector('button');
+    const error = root.querySelector('#manual-import-error');
+    error.textContent = '';
+    button.disabled = true;
+    button.textContent = 'Importing…';
+    try {
+      const res = await fetch('/api/v1/records/import', { method: 'POST', credentials: 'same-origin', body: new FormData(form) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Import failed (${res.status})`);
+      toast(`${data.imported} file${data.imported === 1 ? '' : 's'} imported`);
+      form.reset();
+      await render();
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Import files';
+    }
+  });
   root.querySelectorAll('[data-lock]').forEach((b) => (b.onclick = () => act(() => post(`/records/connections/${b.dataset.lock}/lock`), 'Locked')));
   root.querySelectorAll('[data-reconnect]').forEach((b) => (b.onclick = () => startConnect({ fhir_base: b.dataset.reconnect, name: b.dataset.name }).catch((err) => toast(err.message, true))));
   root.querySelectorAll('[data-disconnect]').forEach(

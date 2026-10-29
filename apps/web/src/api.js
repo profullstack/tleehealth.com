@@ -1141,6 +1141,14 @@ api.get('/records/files/:id', async (c) => {
   return download(c, await records.file(user.id, uuid(c.req.param('id'))));
 });
 
+api.post('/records/import', async (c) => {
+  const user = await requireUser(c);
+  const form = await c.req.parseBody({ all: true });
+  const raw = form.files ?? form.file;
+  const files = (Array.isArray(raw) ? raw : [raw]).filter((f) => f && typeof f.arrayBuffer === 'function');
+  return c.json(await records.manualImport(user, files), 201);
+});
+
 api.post('/records/connect', async (c) => {
   const user = await requireUser(c);
   const b = await body(c);
