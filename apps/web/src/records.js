@@ -114,6 +114,9 @@ export const SANDBOX_BASE = `https://launch.smarthealthit.org/v/r4/sim/${Buffer.
 ).toString('base64url')}/fhir`;
 
 const EPIC_DIRECTORY_URL = 'https://open.epic.com/Endpoints/R4';
+// OCHIN's shared Epic/MyChart FHIR gateway. The patient chooses their
+// participating health center in OCHIN's own authorization flow.
+const OCHIN_FHIR_BASE = 'https://webprd.ochin.org/prd-fhir/api/FHIR/R4';
 let epicCache = { at: 0, list: [] };
 
 /** Every organization on Epic with a patient API: the MyChart directory. */
@@ -135,7 +138,10 @@ async function epicDirectory() {
 }
 
 function builtIns() {
-  const list = [{ id: 'sandbox', name: 'Demo patient (SMART Health IT sandbox)', vendor: 'sandbox', fhir_base: SANDBOX_BASE }];
+  const list = [
+    { id: 'ochin-mychart', name: 'OCHIN MyChart', vendor: 'epic', fhir_base: OCHIN_FHIR_BASE },
+    { id: 'sandbox', name: 'Demo patient (SMART Health IT sandbox)', vendor: 'sandbox', fhir_base: SANDBOX_BASE },
+  ];
   if (process.env.EPIC_SANDBOX_CLIENT_ID)
     list.push({ id: 'epic-sandbox', name: 'Epic sandbox (MyChart test patients)', vendor: 'epic-sandbox', fhir_base: EPIC_SANDBOX_BASE });
   return list;
