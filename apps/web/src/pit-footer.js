@@ -36,5 +36,7 @@ export async function withPitFooter(page) {
     else await refresh();
   }
   const i = page.lastIndexOf('</body>');
-  return html && i !== -1 ? `${page.slice(0, i)}${html}\n${page.slice(i)}` : page;
+  if (i === -1) return page;
+  const registration = page.includes('/pwa-register.js') ? '' : '<script src="/pwa-register.js" defer></script>\n';
+  return `${page.slice(0, i)}${registration}${html ? `${html}\n` : ''}${page.slice(i)}`;
 }

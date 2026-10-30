@@ -199,6 +199,9 @@ app.get('/manifest.webmanifest', (c) =>
   c.body(pub('manifest.webmanifest'), 200, { 'content-type': 'application/manifest+json' }),
 );
 app.get('/sw.js', (c) => c.body(pub('sw.js'), 200, { 'content-type': 'text/javascript', 'cache-control': 'no-cache' }));
+app.get('/icon-192.png', (c) => c.body(pub('icon-192.png'), 200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' }));
+app.get('/icon-512.png', (c) => c.body(pub('icon-512.png'), 200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' }));
+app.get('/pwa-register.js', (c) => c.body(pub('pwa-register.js'), 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=86400' }));
 app.get('/icon.svg', (c) =>
   c.body(pub('icon.svg'), 200, { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400' }),
 );
