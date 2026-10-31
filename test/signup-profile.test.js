@@ -20,8 +20,9 @@ test('the signup page shell carries the profile fields, once each', async () => 
   const html = await (await app.request('/signup')).text();
   for (const name of ['first_name', 'last_name', 'company_domain', 'job_title', 'linkedin_url'])
     expect(html.match(new RegExp(`name="${name}"`, 'g'))?.length).toBe(1);
-  // Email is the form's own box, not the template's.
-  expect(html).not.toContain('name="email"');
+  // The shared footer has its own email field; the profile template does not.
+  const fields = html.match(/<template id="profile-fields">[\s\S]*?<\/template>/)?.[0] ?? '';
+  expect(fields).not.toContain('name="email"');
   expect((await app.request('/assets/profile.js')).headers.get('content-type')).toContain('javascript');
 });
 

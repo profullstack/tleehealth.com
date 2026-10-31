@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import { x402Gateway } from '@profullstack/x402-gateway/hono';
 import { createCrawlGate } from './crawl-gate.js';
 import { api, coinpayWebhook, saveSignup } from './api.js';
-import { withPitFooter } from './pit-footer.js';
+import { withUniversalFooter } from './universal-footer.js';
 import * as auth from './auth.js';
 import { config } from './config.js';
 import * as credits from './credits.js';
@@ -35,11 +35,27 @@ export const crawlGate = createCrawlGate();
 if (crawlGate) app.use('*', x402Gateway(crawlGate));
 
 // The landing page is built from the design canvas (design/Main.dc.html). Every
-// page gets the pit.world network footer as the last thing in <body>.
+// HTML page gets the shared Profullstack footer as the last thing in <body>.
 const page = async (c, name) =>
-  c.html(await withPitFooter(pub(name).toString().replace('<!--year-->', String(new Date().getFullYear()))));
+  c.html(await withUniversalFooter(pub(name).toString().replace('<!--year-->', String(new Date().getFullYear()))));
 app.get('/', (c) => page(c, 'index.html'));
 app.get('/healthz', (c) => c.text('ok'));
+
+// The personal health tracker is a local-first PWA. It has no account or API
+// calls; readings live in the visitor's IndexedDB and never reach the server.
+app.get('/health/', (c) => c.redirect('/health', 301));
+app.get('/health', (c) =>
+  c.body(pub('health/index.html'), 200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' }),
+);
+app.get('/health/health.css', (c) =>
+  c.body(pub('health/health.css'), 200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'no-cache' }),
+);
+app.get('/health/health.js', (c) =>
+  c.body(pub('health/health.js'), 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
+);
+app.get('/health/manifest.webmanifest', (c) =>
+  c.body(pub('health/manifest.webmanifest'), 200, { 'content-type': 'application/manifest+json', 'cache-control': 'no-cache' }),
+);
 
 // The app: one shell for the team, patients and sign-in. It talks only to /api/v1.
 // The shared profile fields (@profullstack/profile) ride in the shell as a
@@ -50,7 +66,7 @@ const PROFILE_TEMPLATE = `<template id="profile-fields">${renderProfileFields({
 })}</template>`;
 const shell = async (c) =>
   c.html(
-    await withPitFooter(
+    await withUniversalFooter(
       pub('app/index.html')
         .toString()
         .replace('<!--year-->', String(new Date().getFullYear()))
@@ -116,7 +132,7 @@ app.get('/i/:code', async (c) => {
   );
   const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
   return c.html(
-    await withPitFooter(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    await withUniversalFooter(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>You're invited to tleehealth</title><meta name="robots" content="noindex"><link rel="stylesheet" href="/assets/app.css"><link rel="icon" href="/icon.svg"></head>
 <body><div class="center"><div class="auth"><h1>You're invited to tleehealth</h1>
 <p class="muted">Scheduling, prescriptions, labs and AI follow-up calls for your practice. Join with this invite and you both get ${credits.INVITE_BONUS_DAYS} days of the paid plan, on top of the 14-day trial.</p>
