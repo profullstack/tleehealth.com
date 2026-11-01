@@ -52,6 +52,32 @@ describe('web', () => {
     expect(foot.match(/&copy;/g)?.length).toBe(1);
   });
   test('healthz', async () => expect((await get('/healthz')).status).toBe(200));
+  test('health tracker is served offline-first and owns the /health/ service-worker scope', async () => {
+    const redirect = await get('/health');
+    expect(redirect.status).toBe(301);
+    expect(redirect.headers.get('location')).toBe('/health/');
+    const page = await get('/health/');
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('Encrypted on this device before saving');
+    expect((await get('/health/health.css')).status).toBe(200);
+    const script = await get('/health/health.js');
+    expect(script.status).toBe(200);
+    const source = await script.text();
+    expect(source).toContain("from '/assets/vault-crypto.js'");
+    expect(source).toContain('vaultCrypto.encryptObject');
+    expect(source).toContain('vaultCrypto.decryptObject');
+    expect((await get('/health/manifest.webmanifest')).status).toBe(200);
+    const worker = await get('/health/sw.js');
+    expect(worker.status).toBe(200);
+    expect(worker.headers.get('service-worker-allowed')).toBe('/health/');
+    expect(await worker.text()).toContain('/assets/vault-crypto.js');
+  });
+  test('sign out clears the browser session cookie', async () => {
+    const res = await app.request('/api/v1/auth/signout', { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie')).toContain('th_session=;');
+    expect(res.headers.get('set-cookie')).toContain('Max-Age=0');
+  });
   test('api health reports the database', async () => {
     const res = await get('/api/v1/health');
     const body = await res.json();

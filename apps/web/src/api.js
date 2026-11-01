@@ -144,8 +144,17 @@ api.post('/auth/link', async (c) => {
 });
 
 api.post('/auth/signout', async (c) => {
-  await auth.endSession(getCookie(c, config.session.cookie));
+  const sessionId = getCookie(c, config.session.cookie);
+  // Clear the browser cookie even if the database is temporarily unavailable.
+  // The user loses this browser's session immediately; report a partial failure
+  // so the session row can be revoked on a later retry if needed.
   c.header('set-cookie', auth.sessionCookie('', { clear: true }));
+  try {
+    await auth.endSession(sessionId);
+  } catch {
+    console.error('[auth] signout could not revoke the server session');
+    return c.json({ error: 'Signed out on this device, but the server could not revoke the session yet.' }, 503);
+  }
   return c.json({ ok: true });
 });
 

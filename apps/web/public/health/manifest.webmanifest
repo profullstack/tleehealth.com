@@ -1,0 +1,12 @@
+{
+  "id": "/health/",
+  "name": "tleehealth · Health tracker",
+  "short_name": "Health tracker",
+  "description": "A private health tracker that stores readings on this device.",
+  "start_url": "/health/",
+  "scope": "/health/",
+  "display": "standalone",
+  "background_color": "#0A0D0C",
+  "theme_color": "#0A0D0C",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

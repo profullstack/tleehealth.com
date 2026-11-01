@@ -97,7 +97,7 @@ async function api(method, path, body) {
     go('/signin');
     throw new ApiError('Please sign in');
   }
-  if (!res.ok) throw Object.assign(new ApiError(data.error || `Request failed (${res.status})`), { errors: data.errors });
+  if (!res.ok) throw Object.assign(new ApiError(data.error || `Request failed (${res.status})`), { errors: data.errors, status: res.status });
   return data;
 }
 const get = (p) => api('GET', p);
@@ -256,6 +256,7 @@ function shell(path, main) {
       ${state.me.patient_of.length ? navItem('/portal', 'My health') : ''}
       ${navItem('/portal/records', 'My records')}
     </nav>
+    <div class="side-foot"><span class="dim small">${esc(state.me.user.email)}</span><button class="sm" id="shell-signout" type="button">Sign out</button></div>
   </aside>
   <main class="main" id="main">
     ${o.billing.active ? '' : `<div class="card"><div class="card-b row" style="justify-content:space-between"><span><span class="badge b-alert">read-only</span> This practice's trial has ended and it is unpaid.</span>${is(ADMIN) ? '<a class="btn primary sm" href="/app/billing">Pay now</a>' : ''}</div></div>`}
@@ -270,6 +271,7 @@ function bindShell() {
     store.set('org', sw.value);
     go('/app');
   };
+  document.getElementById('shell-signout')?.addEventListener('click', signOut);
 }
 
 /* --------------------------------------------------------------- sign-in -- */
@@ -391,8 +393,21 @@ function renderNewPractice() {
 
 async function signOut() {
   lockRecordVault();
-  await post('/auth/signout');
-  location.href = '/signin';
+  const buttons = [...document.querySelectorAll('#signout, #shell-signout, #so')];
+  buttons.forEach((button) => { button.disabled = true; button.textContent = 'Signing out…'; });
+  try {
+    await post('/auth/signout');
+    location.replace('/signin');
+  } catch (err) {
+    // The server clears the cookie even when it cannot reach Postgres to delete
+    // the session row. Finish the local logout in that case too.
+    if (err.status === 503) {
+      location.replace('/signin');
+      return;
+    }
+    buttons.forEach((button) => { button.disabled = false; button.textContent = 'Sign out'; });
+    toast(`Could not finish signing out: ${err.message}. Please try again.`, true);
+  }
 }
 
 /* ----------------------------------------------------------------- today -- */

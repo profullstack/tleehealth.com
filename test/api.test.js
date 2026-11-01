@@ -49,6 +49,16 @@ describe.skipIf(!configured())('api', () => {
     expect((await client('').get('/me')).status).toBe(401);
   });
 
+  test('sign out clears the cookie and revokes the server session', async () => {
+    const session = await signIn(`logout${tag}@example.com`);
+    expect((await client(session).get('/me')).status).toBe(200);
+    const res = await app.request('/api/v1/auth/signout', { method: 'POST', headers: { cookie: session } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie')).toContain('th_session=;');
+    expect(res.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect((await client(session).get('/me')).status).toBe(401);
+  });
+
   test('an expired or reused link goes back to sign-in', async () => {
     const res = await app.request('/auth/magic?t=nope');
     expect(res.headers.get('location')).toBe('/signin?error=expired');

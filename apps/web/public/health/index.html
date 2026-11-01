@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0A0D0C">
+  <meta name="description" content="A private health tracker that saves readings on this device.">
+  <meta name="robots" content="noindex">
+  <title>Health tracker · tleehealth</title>
+  <link rel="manifest" href="/health/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg">
+  <link rel="stylesheet" href="/health/health.css">
+  <script type="module" src="/health/health.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <a class="brand" href="/">tleehealth</a>
+      <a class="account" href="/portal/records">My encrypted records</a>
+    </header>
+    <section class="intro">
+      <p class="eyebrow">Private health tracker</p>
+      <h1>Your readings, on this device.</h1>
+      <p class="lede">Record measurements and review changes over time. This tracker does not require an account and does not send readings to tleehealth.</p>
+    </section>
+    <section class="notice" aria-label="Storage details">
+      <strong>Encrypted on this device before saving.</strong> Your passphrase and recovery key are never sent to tleehealth. Readings never reach the server. Export an encrypted backup to move them to another device. If you lose both keys, the readings cannot be recovered.
+    </section>
+    <section class="card" id="vault-card"><div class="card-b" id="vault-screen" aria-live="polite"></div></section>
+    <div id="tracker" hidden>
+      <section class="card">
+        <div class="card-head"><div><p class="eyebrow">New reading</p><h2>Add a measurement</h2></div><button type="button" id="lock">Lock tracker</button></div>
+        <form id="entry-form" class="form">
+          <label>Measurement
+            <select name="kind" id="kind" required>
+              <option value="blood-pressure">Blood pressure</option>
+              <option value="weight">Weight</option>
+              <option value="glucose">Blood glucose</option>
+              <option value="heart-rate">Heart rate</option>
+              <option value="temperature">Temperature</option>
+              <option value="oxygen">Oxygen saturation</option>
+            </select>
+          </label>
+          <label id="value-label">Value <span id="unit">mmHg (systolic/diastolic)</span>
+            <input name="value" id="value" required maxlength="32" placeholder="120/80" inputmode="text" autocomplete="off">
+          </label>
+          <label>Date and time<input name="takenAt" type="datetime-local" id="taken-at" required></label>
+          <label class="notes">Note <span>(optional)</span><textarea name="note" maxlength="500" rows="2" placeholder="For example, before breakfast"></textarea></label>
+          <div class="actions"><button class="primary" type="submit">Save reading</button><span class="hint" id="form-status" role="status"></span></div>
+        </form>
+      </section>
+      <section class="card readings">
+        <div class="card-head list-head"><div><p class="eyebrow">History</p><h2>Your readings</h2></div><div class="actions tools"><button type="button" id="export">Export encrypted backup</button><label class="import">Import backup<input id="import" type="file" accept="application/json,.json"></label></div></div>
+        <p id="empty" class="empty">No readings saved yet.</p>
+        <div class="table-wrap"><table id="table" hidden><thead><tr><th>Measurement</th><th>Reading</th><th>Date</th><th>Note</th><th><span class="sr-only">Action</span></th></tr></thead><tbody id="rows"></tbody></table></div>
+      </section>
+      <footer><span>For tracking only. This is not a diagnosis or medical advice.</span><button type="button" class="clear" id="clear">Delete all readings</button></footer>
+    </div>
+  </main>
+</body>
+</html>

@@ -44,8 +44,8 @@ app.get('/healthz', (c) => c.text('ok'));
 
 // The personal health tracker is a local-first PWA. It has no account or API
 // calls; readings live in the visitor's IndexedDB and never reach the server.
-app.get('/health/', (c) => c.redirect('/health', 301));
-app.get('/health', (c) =>
+app.get('/health', (c) => c.redirect('/health/', 301));
+app.get('/health/', (c) =>
   c.body(pub('health/index.html'), 200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' }),
 );
 app.get('/health/health.css', (c) =>
@@ -56,6 +56,9 @@ app.get('/health/health.js', (c) =>
 );
 app.get('/health/manifest.webmanifest', (c) =>
   c.body(pub('health/manifest.webmanifest'), 200, { 'content-type': 'application/manifest+json', 'cache-control': 'no-cache' }),
+);
+app.get('/health/sw.js', (c) =>
+  c.body(pub('health/sw.js'), 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'service-worker-allowed': '/health/' }),
 );
 
 // The app: one shell for the team, patients and sign-in. It talks only to /api/v1.
