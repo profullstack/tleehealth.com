@@ -271,8 +271,8 @@ function bindShell() {
  * The shared profile fields (@profullstack/profile), from the <template> the
  * server renders into the shell, filled with `values`.
  */
-function profileFields(values = {}) {
-  const t = document.getElementById('profile-fields');
+function profileFields(values = {}, importOpenProfile = false) {
+  const t = document.getElementById(importOpenProfile ? 'contact-profile-fields' : 'profile-fields');
   if (!t) return '';
   const box = document.createElement('div');
   box.append(t.content.cloneNode(true));
@@ -294,6 +294,13 @@ function showFieldErrors(form, errors = {}) {
     p.textContent = msg;
     input.after(p);
   }
+}
+
+function enhanceProfile() {
+  const script = document.createElement('script');
+  script.src = '/assets/profile.js';
+  document.body.append(script);
+  script.onload = () => script.remove();
 }
 
 function renderSignin(q, signup = false) {
@@ -1327,7 +1334,7 @@ async function viewSettings() {
         <form id="me-form" class="row"><label class="f" style="flex:1">Name<input name="name" value="${esc(state.me.user.name ?? '')}"></label><button type="submit" style="align-self:flex-end">Save</button></form>
         <p class="dim small">${esc(state.me.user.email)}</p></div></section>
       <section class="card" id="contact"><div class="card-h"><h2>Contact details</h2></div><div class="card-b">
-        <form id="contact-form" class="stack">${profileFields(profile)}<div><button type="submit">Save contact details</button></div></form>
+        <form id="contact-form" class="stack">${profileFields(profile, true)}<div><button type="submit">Save contact details</button></div></form>
         <p class="dim small">Private to your account. Sent with ${esc(state.me.user.email)}.</p></div></section>
       <section class="card"><div class="card-h"><h2>Passkeys</h2><button class="sm" id="add-passkey">Add a passkey</button></div>
         <div class="card-b muted">${state.me.passkeys ? `${state.me.passkeys} passkey${state.me.passkeys === 1 ? '' : 's'} saved. Sign in with Face ID, Touch ID or your security key.` : 'Add one to sign in without waiting for an email.'}</div></section>
@@ -1354,6 +1361,7 @@ async function viewSettings() {
   return {
     html,
     bind() {
+      enhanceProfile();
       document.getElementById('signout').onclick = signOut;
       document.getElementById('me-form').onsubmit = (e) => {
         e.preventDefault();

@@ -18,8 +18,9 @@ const link = (body) =>
 
 test('the signup page shell carries the profile fields, once each', async () => {
   const html = await (await app.request('/signup')).text();
+  const signupFields = html.match(/<template id="profile-fields">([\s\S]*?)<\/template>/)?.[1] ?? '';
   for (const name of ['first_name', 'last_name', 'company_domain', 'job_title', 'linkedin_url'])
-    expect(html.match(new RegExp(`name="${name}"`, 'g'))?.length).toBe(1);
+    expect(signupFields.match(new RegExp(`name="${name}"`, 'g'))?.length).toBe(1);
   // The shared footer has its own email field; the profile template does not.
   const fields = html.match(/<template id="profile-fields">[\s\S]*?<\/template>/)?.[0] ?? '';
   expect(fields).not.toContain('name="email"');
