@@ -64,13 +64,18 @@ app.get('/health/manifest.webmanifest', (c) =>
 const PROFILE_TEMPLATE = `<template id="profile-fields">${renderProfileFields({
   fields: PROFILE_COLUMNS.filter((f) => f !== 'email'),
 })}</template>`;
+const CONTACT_PROFILE_TEMPLATE = `<template id="contact-profile-fields">${renderProfileFields({
+  fields: PROFILE_COLUMNS.filter((f) => f !== 'email'),
+  importOpenProfile: true,
+})}</template>`;
 const shell = async (c) =>
   c.html(
     await withUniversalFooter(
       pub('app/index.html')
         .toString()
         .replace('<!--year-->', String(new Date().getFullYear()))
-        .replace('<!--profile-fields-->', PROFILE_TEMPLATE),
+        .replace('<!--profile-fields-->', PROFILE_TEMPLATE)
+        .replace('<!--contact-profile-fields-->', CONTACT_PROFILE_TEMPLATE),
     ),
   );
 for (const p of ['/app', '/app/*', '/signin', '/signup', '/portal', '/portal/*']) app.get(p, shell);
