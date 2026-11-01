@@ -1548,7 +1548,7 @@ async function renderRecords(q) {
           <span><b>${esc(c.provider_name)}</b> <span class="badge ${CONN_BADGE[c.status] ?? ''}">${c.status === 'syncing' ? 'importing…' : esc(c.status)}</span>
             <div class="sub">${c.records} records · ${c.files} files${c.last_synced_at ? ` · imported ${fmtDate(c.last_synced_at)} ${fmtTime(c.last_synced_at)}` : ''}</div></span>
           <span class="row" style="gap:6px">
-            ${['active', 'error'].includes(c.status) ? `<button class="sm" data-sync="${c.id}">Import again</button>` : ''}
+            ${c.vendor !== 'manual' && ['active', 'error'].includes(c.status) ? `<button class="sm" data-sync="${c.id}">Import again</button>` : ''}
             ${c.status === 'active' && c.unlocked_until ? `<button class="sm" data-lock="${c.id}" title="Import can run until ${esc(fmtDate(c.unlocked_until))} ${esc(fmtTime(c.unlocked_until))}">Lock</button>` : ''}
             ${['expired', 'error', 'revoked', 'locked'].includes(c.status) ? `<button class="sm primary" data-reconnect="${esc(c.fhir_base)}" data-name="${esc(c.provider_name)}">Reconnect</button>` : ''}
             <a class="btn sm" href="/api/v1/records/export?connection=${c.id}">Download</a>
@@ -1563,7 +1563,7 @@ async function renderRecords(q) {
             .join('')}</div>` : ''}</li>`,
         )
         .join('')}</ul>`
-    : '<div class="empty">Nothing connected yet. Find your provider below: you sign in on their site, and everything they keep about you is copied here.</div>';
+    : '<div class="empty">No files imported yet. Download your records from a provider portal, then upload them below.</div>';
 
   root.innerHTML = `<div class="portal">
     ${portalHead('/portal/records')}

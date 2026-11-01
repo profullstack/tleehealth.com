@@ -432,7 +432,14 @@ export function classify(r) {
     case 'DocumentReference': {
       const kinds = [...codes(r.type ? [r.type] : []), ...codes(r.category)].join(' ');
       const title = r.description || cc(r.type) || r.content?.[0]?.attachment?.title || 'Document';
-      const category = SUMMARY.test(`${kinds} ${title.toLowerCase()}`) ? 'summaries' : IMAGING.test(kinds) ? 'imaging' : 'notes';
+      const label = `${kinds} ${title.toLowerCase()}`;
+      const category = SUMMARY.test(label) ? 'summaries'
+        : IMAGING.test(label) ? 'imaging'
+        : /\blabs?\b|laboratory|pathology|bloodwork/.test(label) ? 'labs'
+        : /\bmedications?\b|prescriptions?|pharmacy/.test(label) ? 'medications'
+        : /\bnotes?\b|clinical|progress/.test(label) ? 'notes'
+        : /\breports?\b|document/.test(label) ? 'reports'
+        : 'notes';
       return { category, title, recorded_on: firstDate(r.context?.period?.start, r.date, r.content?.[0]?.attachment?.creation) };
     }
     case 'Composition':
@@ -865,6 +872,13 @@ export async function connections(userId) {
                 join organizations o on o.id = s.org_id where s.connection_id = any(${rows.map((r) => r.id)})`
     : [];
   for (const r of rows) {
+    // Manual file uploads do not have a provider OAuth token to unlock. Applying
+    // the SMART-token lock state to them made ordinary uploads look disconnected.
+    if (r.vendor === MANUAL_VENDOR) {
+      r.locked = false;
+      r.unlocked_until = null;
+      continue;
+    }
     const u = vault.status(r.id);
     r.locked = !u.unlocked && r.status !== 'pending';
     r.unlocked_until = u.expiresAt;

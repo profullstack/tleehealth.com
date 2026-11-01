@@ -83,8 +83,8 @@ describe('records cli output', () => {
     expect(out).toContain('MRN: E12345');
     expect(out).toContain('--category labs');
   });
-  test('no connections points at connect', () => {
-    expect(formatRecords({ ...RECORDS, connections: [] })).toContain('tleehealth connect');
+  test('no records points at the manual upload path', () => {
+    expect(formatRecords({ ...RECORDS, connections: [] })).toContain('/portal/records');
   });
   test('items list files with their ids', () => {
     expect(formatItems([{ title: 'AVS', recorded_on: '2026-09-01', detail: '', files: [{ id: 'f1', title: 'AVS' }], resource_type: 'DocumentReference' }])).toContain('AVS f1');

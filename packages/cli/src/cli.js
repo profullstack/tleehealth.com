@@ -7,8 +7,6 @@
  *   tleehealth log-time PROGRAM_ID MINUTES [--activity A] [--note TEXT] [--date YYYY-MM-DD]
  *   tleehealth records [--category C] [--q TEXT] [--connection ID] [--json]
  *   tleehealth providers QUERY
- *   tleehealth connect QUERY | --provider ID | --fhir URL [--name N] [--no-open]
- *   tleehealth sync [CONNECTION_ID] [--wait]
  *   tleehealth share CONNECTION_ID --org ORG [--off]
  *   tleehealth disconnect CONNECTION_ID
  *   tleehealth export [--format zip|bundle] [--out FILE] [--connection ID]
@@ -38,10 +36,8 @@ const HELP = `tleehealth: telehealth and practice management.
   tleehealth log-time PROGRAM_ID MINUTES [--activity A] [--note T] [--date YYYY-MM-DD]
 
 Your health records from other providers (MyChart and any SMART on FHIR portal):
-  tleehealth providers QUERY                                        find your provider (every Epic/MyChart organization)
-  tleehealth connect QUERY | --provider ID | --fhir URL             sign in there in your browser; everything is imported
+  tleehealth providers QUERY                                        search provider names; automatic connections are paused
   tleehealth records [--category C] [--q TEXT] [--json]             overview, or one category: visits summaries notes labs imaging ...
-  tleehealth sync [CONNECTION_ID] [--wait]                          import again (all connections when no id)
   tleehealth share CONNECTION_ID --org ORG [--off]                  show a connection to a practice you are a patient of
   tleehealth export [--format zip|bundle] [--out FILE]              download everything: personal info, summaries, labs, notes, images
   tleehealth file FILE_ID [--out FILE]                              one attached file
@@ -118,7 +114,7 @@ const fmtBytes = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `$
 
 export function formatRecords(r) {
   if (!r.connections.length)
-    return 'No providers connected. Find yours with: tleehealth providers "<name>"  then  tleehealth connect "<name>"';
+    return 'No records imported. Download files from your provider portal, import them in the web app at /portal/records, then use tleehealth records or export.';
   const lines = [];
   for (const c of r.connections)
     lines.push(

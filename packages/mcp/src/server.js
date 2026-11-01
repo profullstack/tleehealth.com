@@ -117,7 +117,7 @@ const TOOLS = [
   {
     name: 'connect_health_provider',
     description:
-      "Start connecting a provider (provider_id from find_health_providers, or fhir_base for any SMART on FHIR server). Returns authorize_url: the PERSON must open it and sign in at their provider; the import then runs by itself. Check progress with get_health_records.",
+      "Automatic provider connections are paused; this tool currently returns HTTP 410. The patient can download records from their provider portal and import files in the tleehealth web app at /portal/records.",
     inputSchema: {
       type: 'object',
       properties: { provider_id: { type: 'string' }, fhir_base: { type: 'string' }, name: { type: 'string' } },
@@ -126,7 +126,7 @@ const TOOLS = [
   },
   {
     name: 'sync_health_records',
-    description: 'Import again from one connected provider (or all when connection is omitted) and wait for it to finish.',
+    description: 'Sync an older SMART connection if one exists. Manual file uploads cannot sync; automatic provider connections are paused.',
     inputSchema: { type: 'object', properties: { connection: { type: 'string' } }, additionalProperties: false },
   },
   {

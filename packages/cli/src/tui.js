@@ -163,7 +163,7 @@ export function view(s) {
           b.row({ gap: 1 }, (r) => {
             r.column({ size: '2fr', gap: 0 }, (left) => {
               left.panel({ title: 'Connected providers', size: Math.max(4, (rec?.connections.length ?? 0) + 3) }, (p) => {
-                if (!rec?.connections.length) p.text(s.errors.records ?? 'None yet. Connect one in the app (My health → Connect) or: tleehealth connect "<name>"', { fg: theme.muted });
+                if (!rec?.connections.length) p.text(s.errors.records ?? 'None yet. Download records from your provider portal and upload them in the app at /portal/records.', { fg: theme.muted });
                 else
                   p.table({
                     rows: rec.connections,

@@ -273,12 +273,12 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - POST /orgs/:org/refills/:id/approve|deny, /orgs/:org/labs/:id/release
 - PUT /orgs/:org/appointments/:id/summary, POST /orgs/:org/summaries/:id/sign
 - GET /portal                               a patient's own visits, meds, results and summaries
-- GET /records/providers?q=mychart name      providers to connect: every Epic/MyChart organization, plus any SMART on FHIR server by address
-- POST /records/connect                     {"provider_id"} or {"fhir_base"}: returns authorize_url; the patient signs in there and allows access
+- GET /records/providers?q=mychart name      search provider names; automatic connections are paused
+- POST /records/import                      multipart form with one or more files uploads a patient's downloaded records
 - GET /records                              connections, personal information, counts per category
 - GET /records/items?category=&q=&connection=  imported records: visits, after-visit summaries, notes, labs, imaging, meds, conditions, allergies, immunizations, procedures
 - GET /records/files/:id                    an attached file (PDF summary, note, image)
-- POST /records/connections/:id/sync, DELETE /records/connections/:id (deletes everything imported)
+- POST /records/connections/:id/sync is paused for new imports; DELETE /records/connections/:id deletes everything imported through it
 - PUT /records/connections/:id/share        {"org_id","shared"}: show a connection to a practice you are a patient of
 - GET /records/export?format=zip|bundle     download everything: readable files + raw FHIR, or one FHIR Bundle
 - GET /orgs/:org/patients/:id/records       what that patient shared with the practice (audit-logged)

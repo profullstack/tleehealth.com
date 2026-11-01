@@ -1163,6 +1163,7 @@ api.get('/records/connections/:id', async (c) => {
 api.post('/records/connections/:id/sync', async (c) => {
   const user = await requireUser(c);
   const conn = await records.connectionFor(user.id, uuid(c.req.param('id'), 'connection'));
+  if (conn.vendor === 'manual') fail(409, 'manual uploads are files; upload additional records from /portal/records');
   if (['pending', 'expired', 'revoked'].includes(conn.status)) fail(409, `${conn.provider_name}: reconnect first`);
   if (!records.isUnlocked(conn.id)) {
     await records.sync(conn.id); // marks it locked

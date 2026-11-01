@@ -2,19 +2,26 @@
 
 Telehealth and practice management on the CoinPay/Profullstack stack: scheduling,
 prescriptions, tests and labs, after-visit summaries, notifications and newsletters,
-AI follow-up calls on every appointment (Telnyx), and health-record import from any
-provider. Patient advocates (navigators) keep care plans and log their time
+AI follow-up calls on every appointment (Telnyx), and patient-uploaded health-record
+files from provider portals. Patient advocates (navigators) keep care plans and log
+their time
 against care-management programs; the monthly superbill turns those minutes into
 Medicare's PIN (G0023/G0024), CHI (G0019/G0022) and CCM (99490/99439) codes. One account can own many orgs; each org has locations, a manager and a bill.
 
-**Health-record import** (`apps/web/src/records.js`): a patient connects MyChart, or any
-SMART on FHIR patient portal, at `/portal/records` (or `tleehealth connect`). We copy
-everything that API returns, including personal information, visits, after-visit summaries,
-notes, labs, imaging, medications, conditions, allergies, immunizations, procedures and the
-attached PDFs and images. The patient can download all of it as one zip or FHIR bundle, and
-share a connection with a practice. Tokens are sealed under a per-connection key held only in process memory while the patient's unlock lasts (default 8h, `unlock_ttl` up to 7d; `POST /api/v1/records/connections/:id/lock`); a restart pauses imports with status `locked` until the patient reconnects. `HEALTH_TOKEN_KEY` is no longer read. `CLIENT_JWT_PRIVATE_KEY` is tleehealth's own app signing key for Epic (not a user secret).
-MyChart needs `EPIC_CLIENT_ID` from an app registered at fhir.epic.com; until then only
-the demo sandbox (and servers configured with `SMART_CLIENT_ID`) can connect.
+**Health-record import** (`apps/web/src/records.js`): patients can upload files they
+downloaded from MyChart or another portal at `/portal/records`. The server classifies
+the files and stores their contents for the patient to review, export and optionally
+share with a practice. Automatic provider connections are paused: `POST
+/api/v1/records/connect` returns 410. The SMART/FHIR importer remains in the codebase,
+but is not the current import path.
+
+**Encryption status:** patient login and provider-token sealing do not make imported
+medical records end-to-end encrypted. Uploaded files and derived record data are
+currently stored as readable JSON and bytes in the application database, and the API,
+CLI and MCP can return their contents. The server receives and processes the uploaded
+files before storing them. See
+[`docs/e2ee-record-vault.md`](docs/e2ee-record-vault.md) for the E2EE feasibility and
+migration design. Do not describe the current records feature as E2EE.
 
 **Pricing:** each org pays for every user on its team: $10/seat/month, or $199/month for
 up to 1,000 seats, whichever is lower. Patients and leads are free.
@@ -30,6 +37,7 @@ up to 1,000 seats, whichever is lower. Patients and leads are free.
 | `design` | the design canvas artboards (`*.dc.html`); `python3 design/build.py` regenerates the landing page |
 | `packages/cli` | `@profullstack/tleehealth`: CLI, hqtui front-desk TUI (`tleehealth tui`), API client |
 | `packages/mcp` | `@profullstack/tleehealth-mcp`: MCP server over stdio |
+| `docs/e2ee-record-vault.md` | E2EE boundary, feasibility and staged migration design |
 | `bin/install.sh` | `curl -fsSL https://tleehealth.com/install.sh \| sh` |
 
 ```sh
