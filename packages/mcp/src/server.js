@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import {
   call, resolveOrg,
   caseload, connect, dashboardDay, health, logTime, providers, recordItem, recordItems, records, resolveAuth, schedule, superbill,
-  syncConnection,
+  recordVaultObjects, recordVaultStatus, syncConnection,
 } from '@profullstack/tleehealth/client';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -110,6 +110,20 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
   },
   {
+    name: 'get_encrypted_vault_status',
+    description: 'Return only whether the caller has a device-encrypted personal record vault and its encrypted byte/file counts. Never returns the wrapped key, filenames, index, or medical contents; MCP cannot unlock this vault.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'list_encrypted_vault_objects',
+    description: 'List opaque ciphertext object IDs, sizes and upload times for the caller’s encrypted personal record vault. No filenames, decrypted metadata or medical contents are available through MCP.',
+    inputSchema: {
+      type: 'object',
+      properties: { limit: { type: 'integer', minimum: 1, maximum: 500 }, offset: { type: 'integer', minimum: 0 } },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'find_health_providers',
     description: 'Search providers the caller can connect to import records: every Epic/MyChart organization, plus a demo sandbox.',
     inputSchema: { type: 'object', properties: { q: { type: 'string', description: 'words in the organization name' } }, additionalProperties: false },
@@ -181,6 +195,13 @@ async function callTool(name, args) {
       return textResult(await recordItems(auth, args));
     case 'get_health_record':
       return textResult(await recordItem(auth, args.id));
+    case 'get_encrypted_vault_status': {
+      const status = await recordVaultStatus(auth);
+      const { configured, objects, bytes, max_file_bytes, max_object_bytes, max_vault_bytes } = status;
+      return textResult({ configured, objects, bytes, max_file_bytes, max_object_bytes, max_vault_bytes });
+    }
+    case 'list_encrypted_vault_objects':
+      return textResult(await recordVaultObjects(auth, args));
     case 'find_health_providers':
       return textResult(await providers(auth, args.q ?? ''));
     case 'connect_health_provider':

@@ -20,6 +20,7 @@ const pub = (name) => readFileSync(join(here, '..', 'public', name));
 const root = join(here, '..', '..', '..');
 const VERSION = JSON.parse(readFileSync(join(root, 'packages/cli/package.json'), 'utf8')).version;
 const INSTALL_SH = readFileSync(join(root, 'bin/install.sh'), 'utf8');
+const RECORD_VAULT_CRYPTO_JS = readFileSync(join(root, 'packages/vault-crypto/src/index.js'));
 
 export const app = new Hono();
 
@@ -84,6 +85,9 @@ const asset = (name, type) => (c) =>
   c.body(pub(`app/${name}`), 200, { 'content-type': type, 'cache-control': 'no-cache' });
 app.get('/assets/app.js', asset('app.js', 'text/javascript; charset=utf-8'));
 app.get('/assets/app.css', asset('app.css', 'text/css; charset=utf-8'));
+app.get('/assets/vault-crypto.js', (c) =>
+  c.body(RECORD_VAULT_CRYPTO_JS, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
+);
 // The signup form's company-from-work-email helper, from @profullstack/profile.
 app.get('/assets/profile.js', (c) =>
   c.body(PROFILE_ENHANCE_SCRIPT, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),

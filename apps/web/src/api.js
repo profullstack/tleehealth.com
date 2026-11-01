@@ -9,6 +9,7 @@ import { sendAddedToOrg, sendLoginLink } from './mail.js';
 import * as calls from './calls.js';
 import * as nav from './navigation.js';
 import * as records from './records.js';
+import * as recordVault from './record-vault.js';
 import * as credits from './credits.js';
 
 /**
@@ -36,7 +37,9 @@ const fail = (status, message) => {
 };
 
 api.onError((err, c) => {
-  if (err instanceof HttpError || err instanceof records.RecordsError) return c.json({ error: err.message }, err.status);
+  if (err instanceof HttpError || err instanceof records.RecordsError || err instanceof recordVault.RecordVaultError) {
+    return c.json({ error: err.message }, err.status);
+  }
   if (err?.code === '23505') return c.json({ error: 'that already exists' }, 409);
   if (err?.code === '22P02' || err?.code === '22007' || err?.code === '22008') return c.json({ error: 'invalid value' }, 400);
   if (err?.code === '23514') return c.json({ error: 'a value is out of range' }, 400);
@@ -1123,6 +1126,84 @@ api.get('/records', async (c) => {
     myPatientRows(user),
   ]);
   return c.json({ connections, ...summary, practices: practices.map((p) => ({ org_id: p.org_id, org_name: p.org_name })) });
+});
+
+// End-to-end encrypted personal vault. These endpoints accept only opaque
+// ciphertext; filenames, MIME types and record contents never reach this API.
+api.get('/records/vault', async (c) => {
+  const user = await requireUser(c);
+  c.header('cache-control', 'private, no-store');
+  return c.json(await recordVault.status(user.id));
+});
+
+api.put('/records/vault/key', async (c) => {
+  const user = await requireUser(c);
+  c.header('cache-control', 'private, no-store');
+  return c.json(await recordVault.saveKeyEnvelope(user.id, await body(c)));
+});
+
+api.get('/records/vault/objects', async (c) => {
+  const user = await requireUser(c);
+  c.header('cache-control', 'private, no-store');
+  return c.json({ objects: await recordVault.listObjects(user.id, {
+    limit: c.req.query('limit'),
+    offset: c.req.query('offset'),
+  }) });
+});
+
+api.post('/records/vault/objects/:id', async (c) => {
+  const user = await requireUser(c);
+  const id = uuid(c.req.param('id'), 'vault object');
+  const contentLength = Number(c.req.header('content-length') ?? 0);
+  if (contentLength > recordVault.MAX_OBJECT_BYTES) fail(413, 'each encrypted file must be 100 MB or smaller');
+  const ciphertext = new Uint8Array(await c.req.arrayBuffer());
+  c.header('cache-control', 'private, no-store');
+  return c.json(await recordVault.saveObject(user.id, id, ciphertext), 201);
+});
+
+api.get('/records/vault/objects/:id', async (c) => {
+  const user = await requireUser(c);
+  const row = await recordVault.getObject(user.id, c.req.param('id'));
+  return c.body(new Uint8Array(row.ciphertext), 200, {
+    'content-type': 'application/octet-stream',
+    'cache-control': 'private, no-store',
+    'x-content-type-options': 'nosniff',
+  });
+});
+
+api.get('/records/vault/manifest', async (c) => {
+  const user = await requireUser(c);
+  const manifest = await recordVault.getManifest(user.id);
+  c.header('cache-control', 'private, no-store');
+  c.header('x-record-vault-revision', String(manifest.revision));
+  if (!manifest.ciphertext) return c.body(null, 204);
+  return c.body(new Uint8Array(manifest.ciphertext), 200, {
+    'content-type': 'application/octet-stream',
+    'cache-control': 'private, no-store',
+    'x-content-type-options': 'nosniff',
+    'x-record-vault-revision': String(manifest.revision),
+  });
+});
+
+api.put('/records/vault/manifest', async (c) => {
+  const user = await requireUser(c);
+  const ifMatch = c.req.header('if-match') ?? '';
+  if (!/^(?:0|[1-9]\d*)$/.test(ifMatch)) fail(428, 'if-match revision is required');
+  const ciphertext = new Uint8Array(await c.req.arrayBuffer());
+  c.header('cache-control', 'private, no-store');
+  return c.json(await recordVault.saveManifest(user.id, Number(ifMatch), ciphertext));
+});
+
+api.delete('/records/vault/objects/:id', async (c) => {
+  const user = await requireUser(c);
+  c.header('cache-control', 'private, no-store');
+  return c.json(await recordVault.deleteObject(user.id, c.req.param('id')));
+});
+
+api.delete('/records/vault', async (c) => {
+  const user = await requireUser(c);
+  c.header('cache-control', 'private, no-store');
+  return c.json(await recordVault.deleteVault(user.id));
 });
 
 api.get('/records/items', async (c) => {

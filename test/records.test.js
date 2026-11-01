@@ -1,10 +1,11 @@
 // Health-record imports and exports. Automatic provider connections are paused;
 // current API coverage follows the manual file-upload path.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { configured, close } from '../packages/db/src/index.js';
 import { migrate } from '../packages/db/src/migrate.js';
 import * as records from '../apps/web/src/records.js';
+import { createVault, decryptObject, encryptObject, lockVault, rewrapVaultKey, unlockWithPassphrase } from '../packages/vault-crypto/src/index.js';
 import * as vault from '../apps/web/src/token-vault.js';
 const { UnlockStore } = vault;
 import { crc32, zip } from '../apps/web/src/zip.js';
@@ -225,6 +226,7 @@ function fakeFhir() {
 
 describe.skipIf(!configured())('records api', () => {
   let app, auth, patient, owner, orgId, patientId, connId;
+  let ownerCookie, patientCookie;
   const tag = Date.now();
 
   async function signIn(email) {
@@ -242,16 +244,26 @@ describe.skipIf(!configured())('records api', () => {
     const type = res.headers.get('content-type') ?? '';
     return { status: res.status, headers: res.headers, body: type.includes('json') ? await res.json() : new Uint8Array(await res.arrayBuffer()) };
   };
+  const binary = async (cookie, method, path, body, headers = {}) => {
+    const res = await app.request(`/api/v1${path}`, {
+      method,
+      headers: { cookie, ...headers },
+      body,
+    });
+    return { status: res.status, headers: res.headers, bytes: new Uint8Array(await res.arrayBuffer()) };
+  };
 
   beforeAll(async () => {
     await migrate({ log: () => {} });
     ({ app } = await import('../apps/web/src/app.js'));
     auth = await import('../apps/web/src/auth.js');
-    owner = client(await signIn(`rec-owner${tag}@example.com`));
-    patient = client(await signIn(`rec-patient${tag}@example.com`));
+    ownerCookie = await signIn(`rec-owner${tag}@example.com`);
+    patientCookie = await signIn(`rec-patient${tag}@example.com`);
+    owner = client(ownerCookie);
+    patient = client(patientCookie);
     orgId = (await owner('POST', '/orgs', { name: `Records Practice ${tag}`, location: 'Main' })).body.org.id;
     patientId = (await owner('POST', `/orgs/${orgId}/people`, { user_type: 'patient', name: 'Ada Lin', email: `rec-patient${tag}@example.com` })).body.person.id;
-  });
+  }, 30_000);
   afterAll(async () => {
     await close();
   });
@@ -278,6 +290,66 @@ describe.skipIf(!configured())('records api', () => {
 
     const connection = (await patient('GET', `/records/connections/${connId}`)).body.connection;
     expect(connection).toMatchObject({ vendor: 'manual', status: 'active', records: 3, files: 3, locked: false });
+  });
+
+  test('the encrypted vault stores ciphertext only and binds keys, files and index to one account', async () => {
+    const userId = (await patient('GET', '/me')).body.user.id;
+    const created = await createVault(userId, 'a long test vault passphrase');
+    expect((await patient('PUT', '/records/vault/key', created.envelope)).status).toBe(200);
+
+    const objectId = randomUUID();
+    const clearFile = new TextEncoder().encode('private lab result: glucose 90');
+    const sealedFile = await encryptObject(created.handle, userId, objectId, clearFile);
+    const uploaded = await binary(patientCookie, 'POST', `/records/vault/objects/${objectId}`, sealedFile, {
+      'content-type': 'application/octet-stream',
+    });
+    expect(uploaded.status).toBe(201);
+    expect(uploaded.bytes).toEqual(new TextEncoder().encode(JSON.stringify({ id: objectId, size: sealedFile.byteLength })));
+
+    const secretName = 'patient-lab-history.pdf';
+    const manifestId = '00000000-0000-4000-8000-000000000001';
+    const clearManifest = new TextEncoder().encode(JSON.stringify({ version: 1, files: [{ id: objectId, name: secretName, type: 'application/pdf', size: clearFile.byteLength, category: 'labs' }] }));
+    const sealedManifest = await encryptObject(created.handle, userId, manifestId, clearManifest);
+    const savedManifest = await binary(patientCookie, 'PUT', '/records/vault/manifest', sealedManifest, {
+      'content-type': 'application/octet-stream',
+      'if-match': '0',
+    });
+    expect(savedManifest.status).toBe(200);
+    expect(JSON.parse(new TextDecoder().decode(savedManifest.bytes))).toEqual({ revision: 1 });
+
+    const status = (await patient('GET', '/records/vault')).body;
+    expect(status).toMatchObject({ configured: true, objects: 1 });
+    expect(status.envelope.passphrase).toMatchObject({ kdf: 'PBKDF2-SHA256', iterations: 600_000 });
+    expect(status.envelope.keyCheck).toBeUndefined();
+    expect((await owner('GET', '/records/vault')).body).toMatchObject({ configured: false, objects: 0 });
+    expect((await binary(ownerCookie, 'GET', `/records/vault/objects/${objectId}`)).status).toBe(404);
+    expect((await binary(ownerCookie, 'GET', '/records/vault/manifest')).status).toBe(204);
+
+    const downloaded = await binary(patientCookie, 'GET', `/records/vault/objects/${objectId}`);
+    expect(downloaded.status).toBe(200);
+    expect(Buffer.from(downloaded.bytes).includes(Buffer.from('private lab result'))).toBe(false);
+    expect(await decryptObject(created.handle, userId, objectId, downloaded.bytes)).toEqual(clearFile);
+    const manifestDownload = await binary(patientCookie, 'GET', '/records/vault/manifest');
+    expect(manifestDownload.headers.get('x-record-vault-revision')).toBe('1');
+    expect(Buffer.from(manifestDownload.bytes).includes(Buffer.from(secretName))).toBe(false);
+    expect(await decryptObject(created.handle, userId, manifestId, manifestDownload.bytes)).toEqual(clearManifest);
+
+    const forged = await createVault(userId, 'another long and unrelated passphrase');
+    expect((await patient('PUT', '/records/vault/key', forged.envelope)).status).toBe(409);
+    const rotated = await rewrapVaultKey(userId, created.handle, 'a replacement long vault passphrase');
+    expect((await patient('PUT', '/records/vault/key', rotated.envelope)).status).toBe(200);
+    const current = (await patient('GET', '/records/vault')).body.envelope;
+    await expect(unlockWithPassphrase(userId, 'a long test vault passphrase', current)).rejects.toThrow('could not unlock');
+    const unlocked = await unlockWithPassphrase(userId, 'a replacement long vault passphrase', current);
+    expect(await decryptObject(unlocked, userId, objectId, downloaded.bytes)).toEqual(clearFile);
+
+    expect((await patient('DELETE', '/records/vault')).status).toBe(200);
+    expect((await patient('GET', '/records/vault')).body).toMatchObject({ configured: false, objects: 0 });
+    expect((await binary(patientCookie, 'GET', `/records/vault/objects/${objectId}`)).status).toBe(404);
+    expect((await binary(patientCookie, 'GET', '/records/vault/manifest')).status).toBe(204);
+    lockVault(created.handle);
+    lockVault(forged.handle);
+    lockVault(unlocked);
   });
 
   test('a reused state is refused', async () => {

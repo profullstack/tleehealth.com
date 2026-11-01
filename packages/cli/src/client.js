@@ -183,6 +183,64 @@ export const recordFile = (auth, id) => download(auth, `/api/v1/records/files/${
 /** Who at which practice viewed, downloaded or exported the records you shared. */
 export const recordAccess = (auth) => call(auth, '/api/v1/records/access');
 
+/* ---------------------------------------------------- encrypted record vault -- */
+
+export const recordVaultStatus = (auth) => call(auth, '/api/v1/records/vault');
+export const recordVaultObjects = (auth, { limit, offset } = {}) =>
+  call(auth, `/api/v1/records/vault/objects${qs({ limit, offset })}`);
+
+export const saveRecordVaultKey = (auth, envelope) => call(auth, '/api/v1/records/vault/key', {
+  method: 'PUT',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(envelope),
+});
+
+export async function recordVaultRequest(auth, path, init = {}) {
+  const res = await fetch(`${auth.server}${path}`, {
+    ...init,
+    headers: {
+      ...(auth.key ? { authorization: `Bearer ${auth.key}` } : {}),
+      ...(init.headers ?? {}),
+    },
+  });
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!res.ok) {
+    let body = {};
+    try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* response has no JSON body */ }
+    throw new ApiError(res.status, body);
+  }
+  return { status: res.status, headers: res.headers, bytes };
+}
+
+export const uploadRecordVaultObject = (auth, id, bytes) => recordVaultRequest(auth, `/api/v1/records/vault/objects/${encodeURIComponent(id)}`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/octet-stream' },
+  body: bytes,
+});
+
+export const downloadRecordVaultObject = (auth, id) => recordVaultRequest(auth, `/api/v1/records/vault/objects/${encodeURIComponent(id)}`);
+
+export const deleteRecordVaultObject = (auth, id) => recordVaultRequest(auth, `/api/v1/records/vault/objects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+export async function readRecordVaultManifest(auth) {
+  const result = await recordVaultRequest(auth, '/api/v1/records/vault/manifest');
+  return {
+    revision: Number(result.headers.get('x-record-vault-revision') ?? 0),
+    ciphertext: result.status === 204 ? null : result.bytes,
+  };
+}
+
+export async function saveRecordVaultManifest(auth, revision, ciphertext) {
+  const result = await recordVaultRequest(auth, '/api/v1/records/vault/manifest', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/octet-stream', 'if-match': String(revision) },
+    body: ciphertext,
+  });
+  return JSON.parse(new TextDecoder().decode(result.bytes));
+}
+
+export const deleteRecordVault = (auth) => recordVaultRequest(auth, '/api/v1/records/vault', { method: 'DELETE' });
+
 /* ------------------------------------------------- credit codes + invites -- */
 
 const postJson = (auth, path, body) =>

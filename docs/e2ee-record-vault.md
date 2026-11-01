@@ -1,108 +1,65 @@
-# End-to-end encryption for personal health records
+# End-to-end encrypted personal record vault
 
-## Current state
+## What is encrypted
 
-Accounts already support emailed magic links and passkeys. The web app is a PWA,
-the `/api/v1` API backs the app and clients, and the CLI and MCP packages can read
-the signed-in user's imported records. There is no desktop app in this repository.
+The personal vault stores files that a user selects in the PWA or imports with
+the CLI. Those clients encrypt each file and the filename, MIME type, category,
+size and encrypted index locally before upload. The API stores an opaque key
+envelope, ciphertext and the minimum routing data needed to store and return it.
+The API has no decrypt, search, preview, export or plaintext import route for
+vault objects.
 
-The records path is **not end-to-end encrypted** today:
+The PWA and CLI share the versioned `@profullstack/tleehealth-vault` format:
 
-- `health_records.resource` stores provider FHIR resources as `jsonb`.
-- `health_files.data` stores downloaded PDFs, images and other attachments as
-  readable bytes.
-- The current import path uploads files to the server, which classifies and stores
-  them. Record, file and export routes return PHI; API keys and the MCP server can
-  therefore read it.
-- Provider access and refresh tokens use a separate in-memory unlock design.
-  That protects the stored token blobs while locked, but says nothing about the
-  records in the two tables above.
+- A random 256-bit data key encrypts files and the index with AES-256-GCM.
+- A user passphrase wraps that key with PBKDF2-HMAC-SHA-256 (600,000 iterations)
+  and AES-256-GCM. A randomly generated 256-bit recovery key wraps the same key.
+- Each object uses a fresh 96-bit nonce. Authenticated data binds it to the
+  account, object UUID and format version.
+- Account sign-in does not unlock the vault. Passphrase and recovery key are
+  entered locally and are not sent to the API. The key is held in process memory
+  only while unlocked. On lock or command completion the raw key buffer is
+  overwritten and the in-memory key handle is dropped; final cleanup of browser
+  cryptographic objects is managed by the runtime.
 
-The same server-access issue applies to clinic-side charts: scheduling, refills,
-lab release, summaries, care plans and call workflows read and write clinical data
-on the backend. Encrypting those fields so only a patient can decrypt them would
-also prevent those existing workflows from operating as written.
+Setup displays the recovery key once and does not save the key envelope until
+the user confirms it was saved. Recovery rotates both the passphrase envelope
+and recovery key. Losing both secrets makes the vault permanently unreadable.
 
-## Feasibility and scope
+The CLI supports `vault status`, `setup`, `recover`, `import`, `list`, `get`,
+`delete` and `destroy`. Decrypted files are written with owner-only permissions
+and are not overwritten by default. MCP exposes only vault status and opaque
+object IDs, byte counts and upload times; it cannot unlock or return filenames,
+the encrypted index, or medical contents. This avoids sending vault contents to
+an AI tool.
 
-E2EE is feasible for the **personal record vault** if a trusted client does the
-provider connection, record fetch, encryption, decryption, search and export. The
-server can then store and return opaque ciphertext without seeing medical content.
-This is an architecture change, not a database-encryption toggle.
+## What remains outside this boundary
 
-The current file-upload path cannot provide that guarantee because the server
-receives and processes plaintext files. The older SMART/FHIR importer also cannot:
-when enabled, it exchanges authorization codes and tokens, fetches plaintext FHIR
-responses and processes attachments. The API currently returns 410 for new provider
-connections. To make file import E2EE, encrypt in the browser before upload. To make
-a provider connection E2EE, token exchange and sync must run in a user-controlled
-client such as the desktop app or CLI. PWA-only provider sync is also dependent on
-each provider's OAuth and browser CORS support. Providers that require a confidential
-server credential or prevent client-side API access cannot be advertised as E2EE
-sources until a safe client flow exists for them.
+- Existing imported records, legacy file uploads, FHIR data, provider sync and
+  exports remain server-readable. They are separately labeled in the PWA.
+- Clinic charts and server-run clinical workflows remain server-readable.
+- The vault currently supports files chosen by the user. Provider OAuth/FHIR
+  import does not run inside the vault client.
+- There is no desktop application in this repository. The CLI is the current
+  native-client path.
+- E2EE chat is not provided by this vault.
+- Sharing and multi-user key envelopes are not implemented.
 
-This design applies first to records a user imports into their personal vault. It
-does not claim E2EE for practice charts or server-run clinical operations.
+Do not migrate or delete legacy records silently. A future migration must let
+the user encrypt and verify the count and hashes locally, explain backup
+retention, and preserve the legacy copy until the user explicitly confirms.
 
-## Proposed protocol
+## Metadata and trust limits
 
-1. A client generates a random 256-bit vault key. Account login remains separate;
-   a magic link or passkey authenticates the account but never unlocks this key.
-2. The client wraps the vault key locally with a passphrase-derived key. The server
-   stores only the versioned wrapped-key envelope. A recovery secret must be offered
-   at setup because losing every unlock secret means permanent data loss.
-3. Each record and attachment is encrypted on-device with AES-GCM and a fresh
-   random nonce. The authenticated data binds the ciphertext to the account,
-   object ID and format version. Display metadata such as names, dates, categories,
-   provider names and FHIR identifiers stays inside the ciphertext.
-4. The API enforces account ownership and stores opaque object IDs plus ciphertext.
-   It does not search, index, summarize, export, or transform the encrypted contents.
-5. The PWA, CLI and desktop client share a versioned crypto and envelope library.
-   The MCP server does not decrypt in the cloud; an explicitly enabled local MCP
-   client may use an already-unlocked local vault, with medical-record tools off by
-   default.
-6. Sharing requires encrypting a copy or a key envelope for a named recipient.
-   Revocation can stop future access but cannot erase plaintext or keys the
-   recipient already copied.
+The server can see the account ID, opaque object IDs, object count, ciphertext
+sizes, upload times and storage use. The user's device, local malware, browser
+extensions, a compromised client bundle, or plaintext deliberately exported or
+sent elsewhere are outside this encryption boundary. Because the PWA receives
+its code from tleehealth.com, a hostile change to that served code could capture
+the passphrase or unlocked data. Use a trusted, updated device and protect the
+separate recovery key.
 
-The server still learns that an account has vault objects, their opaque IDs, upload
-times and ciphertext sizes. A v1 should state that metadata leakage plainly. It
-should not claim that the user's device, a compromised app bundle, malware, browser
-extensions, or content deliberately sent to an AI/MCP client is protected by E2EE.
-
-## Migration sequence
-
-1. **Freeze the security boundary.** Define the envelope format, KDF parameters,
-   recovery and device enrollment behavior, metadata leakage, sharing semantics,
-   and the exact records in scope. Keep clinic charts outside the E2EE claim.
-2. **Build the shared client crypto and opaque vault API.** Add ownership-checked
-   key-envelope and ciphertext-object operations. The server must never accept a
-   plaintext fallback on these routes.
-3. **Ship one complete client path.** Add local encryption, unlock, decrypt,
-   search, export and recovery to the PWA for user-selected local files and FHIR
-   bundles. The browser must encrypt before upload; remove plaintext upload as the
-   default for vault objects. Keep decrypted keys in memory and clear them on
-   lock/sign-out.
-4. **Add device clients.** Implement desktop and CLI against the same format,
-   store local unlock material with the platform keychain where available, and
-   import/export ciphertext without translating it through plaintext server APIs.
-5. **Move eligible provider connections local.** Implement OAuth PKCE and FHIR
-   sync in the desktop/CLI connector. Add a provider to the E2EE list only after
-   confirming its public-client registration, token flow and attachment access.
-6. **Add local MCP access deliberately.** Require explicit local configuration and
-   a live unlock before an MCP tool can decrypt PHI. Keep server-hosted MCP calls
-   limited to opaque vault management.
-7. **Offer a user-driven legacy migration.** The old API can deliver a user's
-   plaintext records to their unlocked client, which encrypts and uploads them.
-   Delete the old rows only after the client confirms counts and hashes. Backups
-   containing the old plaintext must expire before claiming those copies are gone.
-   Do not silently rewrite or delete medical data.
-
-## Completion criteria
-
-An E2EE claim is accurate only when the server has no path to plaintext during
-import, storage, search, export or MCP access; key recovery and device loss behavior
-are documented; clients interoperate on the same versioned format; legacy plaintext
-is visibly distinguished and migration is user-controlled; and the deployed user
-path has been verified from a fresh device. Until then, describe current database
-and transport protections precisely, and do not label records E2EE.
+This design protects vault contents from the API and database at rest and during
+normal API use. It does not make every health record in the account E2EE, and
+the product must keep that distinction visible until the legacy data path is
+migrated.

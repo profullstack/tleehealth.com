@@ -14,6 +14,7 @@
         "@profullstack/profile": "0.1.8",
         "@profullstack/redeem-credits": "0.2.0",
         "@profullstack/sealed-secrets": "0.1.0",
+        "@profullstack/tleehealth-vault": "workspace:*",
         "@profullstack/x402-gateway": "^0.13.1",
         "@simplewebauthn/browser": "^14.0.0",
         "@simplewebauthn/server": "^14.0.3",
@@ -25,12 +26,13 @@
     },
     "packages/cli": {
       "name": "@profullstack/tleehealth",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "bin": {
         "tleehealth": "./bin/tleehealth.mjs",
       },
       "dependencies": {
         "@profullstack/hqtui": "^0.11.1",
+        "@profullstack/tleehealth-vault": "^0.1.0",
       },
     },
     "packages/db": {
@@ -43,7 +45,7 @@
     },
     "packages/mcp": {
       "name": "@profullstack/tleehealth-mcp",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "bin": {
         "tleehealth-mcp": "./bin/tleehealth-mcp.mjs",
       },
@@ -53,6 +55,10 @@
     },
     "packages/payments": {
       "name": "@tleehealth/payments",
+      "version": "0.1.0",
+    },
+    "packages/vault-crypto": {
+      "name": "@profullstack/tleehealth-vault",
       "version": "0.1.0",
     },
   },
@@ -114,6 +120,8 @@
     "@profullstack/tleehealth": ["@profullstack/tleehealth@workspace:packages/cli"],
 
     "@profullstack/tleehealth-mcp": ["@profullstack/tleehealth-mcp@workspace:packages/mcp"],
+
+    "@profullstack/tleehealth-vault": ["@profullstack/tleehealth-vault@workspace:packages/vault-crypto"],
 
     "@profullstack/x402-gateway": ["@profullstack/x402-gateway@0.13.1", "", { "dependencies": { "@profullstack/keys": "^0.1.0" } }, "sha512-V7liSO0tShZRlp8dancuDuUSF/rqrr5YF3bzLoZy9wn6ixf1RIRPYTepe72s36JOdSVzi3wfuhaZFm9y0RpV4w=="],
 

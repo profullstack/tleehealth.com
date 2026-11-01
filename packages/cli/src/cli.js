@@ -20,11 +20,19 @@
  * (or --org) picks the practice when you are on more than one.
  */
 import { spawn } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { basename, join } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import {
+  createVault, decryptObject, encryptObject, lockVault, packFile, rewrapVaultKey,
+  unlockWithPassphrase, unlockWithRecoveryKey, unpackFile,
+} from '@profullstack/tleehealth-vault';
+import {
   caseload, connect, connection, disconnect, exportRecords, health, logTime, providers, recordAccess, recordFile, recordItems, records,
-  resolveAuth, saveConfig, schedule, shareConnection, superbill, syncConnection,
+  deleteRecordVault, deleteRecordVaultObject, downloadRecordVaultObject, me, readRecordVaultManifest,
+  recordVaultStatus, resolveAuth, saveConfig, saveRecordVaultKey, saveRecordVaultManifest,
+  schedule, shareConnection, superbill, syncConnection, uploadRecordVaultObject,
   applyCredits, createInvite, creditBalance, invites, redeemCode,
 } from './client.js';
 
@@ -43,6 +51,16 @@ Your health records from other providers (MyChart and any SMART on FHIR portal):
   tleehealth file FILE_ID [--out FILE]                              one attached file
   tleehealth access                                                 who at which practice opened your shared records
   tleehealth disconnect CONNECTION_ID                               remove it and everything it imported
+
+End-to-end encrypted personal vault (client-side encryption; separate from legacy records):
+  tleehealth vault status                                           vault setup and encrypted file count
+  tleehealth vault setup                                            create vault, passphrase and recovery key
+  tleehealth vault recover                                          unlock with recovery key and rotate passphrase
+  tleehealth vault import FILE...                                   encrypt files locally and upload ciphertext
+  tleehealth vault list                                             unlock and list decrypted filenames
+  tleehealth vault get OBJECT_ID [--out FILE]                       decrypt one file locally
+  tleehealth vault delete OBJECT_ID                                 delete an encrypted file
+  tleehealth vault destroy                                          permanently delete the encrypted vault
 
 Credit codes and invites (days of a practice's paid plan):
   tleehealth redeem CODE [--org ORG] [--keep]                       redeem a code onto a practice (--keep: into your balance)
@@ -191,6 +209,230 @@ async function save(bytes, out) {
   process.stderr.write(`Saved ${fmtBytes(bytes.length)} to ${out}. It holds health information; keep it private.\n`);
 }
 
+async function promptSecret(label) {
+  const input = process.stdin;
+  if (!input.isTTY || typeof input.setRawMode !== 'function') {
+    throw new Error('Vault secrets require an interactive terminal; do not pass them as command-line arguments.');
+  }
+  process.stderr.write(`${label}: `);
+  input.setEncoding('utf8');
+  input.setRawMode(true);
+  input.resume();
+  return new Promise((resolve, reject) => {
+    let value = '';
+    const cleanup = () => {
+      input.off('data', onData);
+      input.setRawMode(false);
+      process.stderr.write('\n');
+    };
+    const onData = (chunk) => {
+      for (const char of chunk) {
+        if (char === '\u0003') {
+          cleanup();
+          reject(new Error('Cancelled.'));
+          return;
+        }
+        if (char === '\r' || char === '\n') {
+          cleanup();
+          resolve(value);
+          return;
+        }
+        if (char === '\u0008' || char === '\u007f') value = value.slice(0, -1);
+        else if (char >= ' ') value += char;
+      }
+    };
+    input.on('data', onData);
+  });
+}
+
+async function promptLine(label) {
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try { return (await rl.question(label)).trim(); } finally { rl.close(); }
+}
+
+function validateManifest(doc) {
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.files) || doc.files.length > 50_000) {
+    throw new Error('The encrypted vault index is invalid. Your files remain encrypted.');
+  }
+  return doc.files.filter((f) => f && typeof f.id === 'string' && /^[0-9a-f-]{36}$/i.test(f.id)
+    && typeof f.name === 'string' && f.name.length <= 255 && Number.isSafeInteger(f.size) && f.size >= 0
+    && typeof f.type === 'string' && typeof f.category === 'string');
+}
+
+async function readVaultManifest(auth, handle, userId) {
+  const { revision, ciphertext } = await readRecordVaultManifest(auth);
+  if (!ciphertext) return { revision, files: [] };
+  const clear = await decryptObject(handle, userId, '00000000-0000-4000-8000-000000000001', ciphertext);
+  try { return { revision, files: validateManifest(JSON.parse(new TextDecoder().decode(clear))) }; }
+  finally { clear.fill(0); ciphertext.fill(0); }
+}
+
+async function writeVaultManifest(auth, handle, userId, revision, files) {
+  const clear = new TextEncoder().encode(JSON.stringify({ version: 1, files }));
+  let sealed;
+  try { sealed = await encryptObject(handle, userId, '00000000-0000-4000-8000-000000000001', clear); }
+  finally { clear.fill(0); }
+  try { return await saveRecordVaultManifest(auth, revision, sealed); }
+  finally { sealed.fill(0); }
+}
+
+async function removeVaultManifestEntry(auth, handle, userId, id) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = await readVaultManifest(auth, handle, userId);
+    try {
+      await writeVaultManifest(auth, handle, userId, current.revision, current.files.filter((file) => file.id !== id));
+      return;
+    } catch (err) {
+      if (err.status !== 409 || attempt === 3) throw err;
+    }
+  }
+}
+
+async function unlockVault(auth, userId, status) {
+  if (!status.configured) throw new Error('No encrypted vault yet. Run `tleehealth vault setup`.');
+  const passphrase = await promptSecret('Vault passphrase');
+  return unlockWithPassphrase(userId, passphrase, status.envelope);
+}
+
+async function establishVault(auth, userId, { recover = false } = {}) {
+  const status = await recordVaultStatus(auth);
+  let handle;
+  let envelope;
+  let recoveryKey;
+  if (recover) {
+    if (!status.configured) throw new Error('No encrypted vault exists to recover.');
+    const enteredRecoveryKey = await promptSecret('Recovery key');
+    const passphrase = await promptSecret('New vault passphrase (at least 16 characters)');
+    const confirm = await promptSecret('Repeat new passphrase');
+    if (passphrase !== confirm) throw new Error('Passphrases do not match.');
+    handle = await unlockWithRecoveryKey(userId, enteredRecoveryKey, status.envelope);
+    ({ envelope, recoveryKey } = await rewrapVaultKey(userId, handle, passphrase));
+  } else {
+    if (status.configured) throw new Error('A vault already exists. Use `tleehealth vault recover` to rotate its passphrase.');
+    const passphrase = await promptSecret('New vault passphrase (at least 16 characters)');
+    const confirm = await promptSecret('Repeat passphrase');
+    if (passphrase !== confirm) throw new Error('Passphrases do not match.');
+    const created = await createVault(userId, passphrase);
+    handle = created.handle;
+    envelope = created.envelope;
+    recoveryKey = created.recoveryKey;
+  }
+  process.stderr.write('\nSave this new recovery key somewhere separate from your computer. It can unlock every file in this vault.\n\n');
+  process.stdout.write(`${recoveryKey}\n\n`);
+  if ((await promptLine('Type SAVED after you have stored the recovery key: ')) !== 'SAVED') {
+    lockVault(handle);
+    throw new Error('Vault setup cancelled; the key was not saved to the server.');
+  }
+  try {
+    await saveRecordVaultKey(auth, envelope);
+    process.stderr.write(recover ? 'Vault keys rotated.\n' : 'Encrypted vault created.\n');
+  } finally {
+    lockVault(handle);
+  }
+}
+
+async function vaultCommand(auth, action, args, flags) {
+  const status = await recordVaultStatus(auth);
+  if (action === 'status') {
+    console.log(status.configured
+      ? `Encrypted vault configured · ${status.objects} encrypted files · ${fmtBytes(status.bytes)} stored (2 GB limit)\nNames and file contents are encrypted on your device. Run tleehealth vault list to unlock and view filenames.`
+      : 'No encrypted vault yet. Run `tleehealth vault setup`.');
+    return 0;
+  }
+  if (action === 'setup' || action === 'recover') {
+    const { user } = await me(auth);
+    await establishVault(auth, user.id, { recover: action === 'recover' });
+    return 0;
+  }
+  if (action === 'destroy') {
+    if (!status.configured) throw new Error('No encrypted vault exists.');
+    if ((await promptLine('Permanently delete all encrypted vault files and its key? Type DESTROY: ')) !== 'DESTROY') throw new Error('Cancelled.');
+    await deleteRecordVault(auth);
+    console.log('Encrypted vault and all its files deleted.');
+    return 0;
+  }
+  if (!['import', 'list', 'get', 'delete'].includes(action)) {
+    throw new Error('usage: tleehealth vault {status|setup|recover|import|list|get|delete|destroy}');
+  }
+  const { user } = await me(auth);
+  const handle = await unlockVault(auth, user.id, status);
+  try {
+    const current = await readVaultManifest(auth, handle, user.id);
+    if (action === 'list') {
+      for (const f of current.files) console.log(`${f.id}  ${String(f.imported_at ?? '').slice(0, 10).padEnd(10)}  ${f.category.padEnd(14)} ${fmtBytes(f.size).padStart(8)}  ${f.name}`);
+      if (!current.files.length) console.log('No encrypted files. Import with `tleehealth vault import FILE...`.');
+      return 0;
+    }
+    if (action === 'import') {
+      if (!args.length) throw new Error('usage: tleehealth vault import FILE...');
+      const uploaded = [];
+      const additions = [];
+      try {
+        for (const path of args) {
+          const bytes = new Uint8Array(await readFile(path));
+          if (bytes.byteLength > 100 * 1024 * 1024) {
+            bytes.fill(0);
+            throw new Error(`${path}: each file must be 100 MB or smaller.`);
+          }
+          const id = randomUUID();
+          const meta = { id, name: basename(path).slice(0, 255), type: 'application/octet-stream', size: bytes.byteLength, category: 'reports', imported_at: new Date().toISOString() };
+          let packed;
+          let sealed;
+          try { packed = packFile(meta, bytes); } finally { bytes.fill(0); }
+          try { sealed = await encryptObject(handle, user.id, id, packed); } finally { packed.fill(0); }
+          try { await uploadRecordVaultObject(auth, id, sealed); } finally { sealed.fill(0); }
+          uploaded.push(id);
+          additions.push(meta);
+        }
+        await writeVaultManifest(auth, handle, user.id, current.revision, [...current.files, ...additions]);
+      } catch (err) {
+        await Promise.allSettled(uploaded.map((id) => deleteRecordVaultObject(auth, id)));
+        throw err;
+      }
+      console.log(`Encrypted and imported ${additions.length} file${additions.length === 1 ? '' : 's'}.`);
+      return 0;
+    }
+    if (action === 'get') {
+      const id = args[0];
+      const entry = current.files.find((f) => f.id === id);
+      if (!entry) throw new Error('No such file in the encrypted vault index.');
+      const { bytes: sealed } = await downloadRecordVaultObject(auth, id);
+      let clear;
+      let unpacked;
+      try {
+        clear = await decryptObject(handle, user.id, id, sealed);
+      } finally {
+        sealed.fill(0);
+      }
+      try {
+        unpacked = unpackFile(clear);
+      } finally {
+        clear.fill(0);
+      }
+      if (unpacked.metadata.id !== id || unpacked.metadata.size !== unpacked.bytes.byteLength) {
+        unpacked.bytes.fill(0);
+        throw new Error('Decrypted file does not match its encrypted index.');
+      }
+      const out = typeof flags.out === 'string' ? flags.out : join('.', basename(entry.name));
+      try { await writeFile(out, unpacked.bytes, { mode: 0o600, flag: 'wx' }); }
+      finally { unpacked.bytes.fill(0); }
+      console.log(`Decrypted ${entry.name} to ${out} (mode 0600).`);
+      return 0;
+    }
+    if (action === 'delete') {
+      const id = args[0];
+      if (!current.files.some((f) => f.id === id)) throw new Error('No such file in the encrypted vault index.');
+      await removeVaultManifestEntry(auth, handle, user.id, id);
+      await deleteRecordVaultObject(auth, id);
+      console.log('Encrypted file deleted.');
+      return 0;
+    }
+    throw new Error('usage: tleehealth vault {status|setup|recover|import|list|get|delete|destroy}');
+  } finally {
+    lockVault(handle);
+  }
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const { positional, flags } = parse(argv);
   const [cmd, ...rest] = positional;
@@ -200,6 +442,8 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const auth = await resolveAuth({ server: flags.server, key: flags.key });
   switch (cmd) {
+    case 'vault':
+      return vaultCommand(auth, rest[0] ?? 'status', rest.slice(1), flags);
     case 'health': {
       const h = await health(auth);
       console.log(`${auth.server}  ok=${h.ok}  v${h.version}`);

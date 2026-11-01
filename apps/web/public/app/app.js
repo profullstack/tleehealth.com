@@ -1,7 +1,14 @@
 // tleehealth app. Plain ES module, no build step. Talks only to /api/v1.
+import * as recordVaultCrypto from '/assets/vault-crypto.js';
 
 const root = document.getElementById('root');
 const modal = document.getElementById('modal');
+const RECORD_VAULT_MANIFEST_ID = '00000000-0000-4000-8000-000000000001';
+const RECORD_VAULT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const RECORD_VAULT_MAX_BATCH_BYTES = 300 * 1024 * 1024;
+let recordVaultHandle = null;
+let recordVaultUserId = null;
+let recordVaultLockTimer = null;
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const TEAM = ['owner', 'org_manager', 'provider', 'staff', 'advocate'];
 const ADMIN = ['owner', 'org_manager'];
@@ -383,6 +390,7 @@ function renderNewPractice() {
 }
 
 async function signOut() {
+  lockRecordVault();
   await post('/auth/signout');
   location.href = '/signin';
 }
@@ -1532,9 +1540,472 @@ function recordsList(items, fileHref) {
     .join('')}</ul>`;
 }
 
+function lockRecordVault() {
+  clearTimeout(recordVaultLockTimer);
+  recordVaultLockTimer = null;
+  if (recordVaultHandle) recordVaultCrypto.lockVault(recordVaultHandle);
+  recordVaultHandle = null;
+  recordVaultUserId = null;
+}
+
+function unlockRecordVault(handle, userId) {
+  lockRecordVault();
+  recordVaultHandle = handle;
+  recordVaultUserId = userId;
+  recordVaultLockTimer = setTimeout(() => {
+    lockRecordVault();
+    if (location.pathname === '/portal/records') render().catch(() => {});
+  }, 15 * 60 * 1000);
+}
+
+window.addEventListener('pagehide', () => {
+  lockRecordVault();
+  const cardBody = document.querySelector('#record-vault-card .card-b');
+  if (cardBody) cardBody.textContent = 'Locked. Return to the records page and unlock the vault to view its contents.';
+  if (modal.open) modal.close();
+  modal.replaceChildren();
+});
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted && location.pathname === '/portal/records') render().catch(() => {});
+});
+
+function recordCategoryForFile(file) {
+  const name = String(file.name ?? '').toLowerCase();
+  const type = String(file.type ?? '').toLowerCase();
+  if (/\.(dcm|dicom)$/.test(name) || /dicom/.test(type) || /mri|magnetic|ct scan|radiology|x-?ray|ultrasound|mammo/.test(name)) return 'imaging';
+  if (/lab|laboratory|pathology|test.result|bloodwork/.test(name)) return 'labs';
+  if (/after.visit|discharge|summary|ccd|cda|continuity/.test(name)) return 'summaries';
+  if (/medication|prescription|pharmacy/.test(name)) return 'medications';
+  if (/note|clinical|progress/.test(name)) return 'notes';
+  return 'reports';
+}
+
+function validateRecordVaultManifest(doc) {
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.files) || doc.files.length > 50_000) {
+    throw new Error('The encrypted vault index is invalid. Your files remain encrypted.');
+  }
+  return doc.files.filter((f) =>
+    f && typeof f.id === 'string' && /^[0-9a-f-]{36}$/i.test(f.id)
+      && typeof f.name === 'string' && f.name.length <= 255
+      && Number.isSafeInteger(f.size) && f.size >= 0
+      && typeof f.type === 'string' && typeof f.category === 'string',
+  );
+}
+
+async function readRecordVaultManifest(userId) {
+  const res = await fetch('/api/v1/records/vault/manifest', { credentials: 'same-origin' });
+  const revision = Number(res.headers.get('x-record-vault-revision') ?? 0);
+  if (res.status === 204) return { revision, files: [] };
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error ?? `Vault index unavailable (${res.status})`);
+  }
+  const sealed = new Uint8Array(await res.arrayBuffer());
+  const clear = await recordVaultCrypto.decryptObject(recordVaultHandle, userId, RECORD_VAULT_MANIFEST_ID, sealed);
+  try {
+    return { revision, files: validateRecordVaultManifest(JSON.parse(new TextDecoder().decode(clear))) };
+  } finally {
+    clear.fill(0);
+    sealed.fill(0);
+  }
+}
+
+async function writeRecordVaultManifest(userId, expectedRevision, files) {
+  const clear = new TextEncoder().encode(JSON.stringify({ version: 1, files }));
+  let sealed;
+  try {
+    sealed = await recordVaultCrypto.encryptObject(recordVaultHandle, userId, RECORD_VAULT_MANIFEST_ID, clear);
+  } finally {
+    clear.fill(0);
+  }
+  try {
+    const res = await fetch('/api/v1/records/vault/manifest', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/octet-stream', 'if-match': String(expectedRevision) },
+      body: sealed,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(body.error ?? `Vault index update failed (${res.status})`), { status: res.status });
+    return Number(body.revision);
+  } finally {
+    sealed.fill(0);
+  }
+}
+
+async function changeRecordVaultManifest(userId, additions = [], removals = []) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const current = await readRecordVaultManifest(userId);
+    const removeSet = new Set(removals);
+    const next = current.files.filter((file) => !removeSet.has(file.id));
+    const ids = new Set(next.map((file) => file.id));
+    for (const file of additions) {
+      if (!ids.has(file.id)) next.push(file);
+    }
+    try {
+      return await writeRecordVaultManifest(userId, current.revision, next);
+    } catch (err) {
+      if (err.status !== 409 || attempt === 3) throw err;
+    }
+  }
+  throw new Error('The vault changed on another device. Reload and try again.');
+}
+
+async function uploadRecordVaultFiles(files) {
+  const userId = recordVaultUserId;
+  const uploaded = [];
+  const entries = [];
+  try {
+    for (const file of files) {
+      const fileBytes = new Uint8Array(await file.arrayBuffer());
+      const id = crypto.randomUUID();
+      const metadata = {
+        id,
+        name: String(file.name || 'health-record').slice(0, 255),
+        type: String(file.type || 'application/octet-stream').split(';')[0].slice(0, 120),
+        size: fileBytes.byteLength,
+        category: recordCategoryForFile(file),
+        imported_at: new Date().toISOString(),
+      };
+      let packed;
+      let sealed;
+      try {
+        packed = recordVaultCrypto.packFile(metadata, fileBytes);
+      } finally {
+        fileBytes.fill(0);
+      }
+      try {
+        sealed = await recordVaultCrypto.encryptObject(recordVaultHandle, userId, id, packed);
+      } finally {
+        packed.fill(0);
+      }
+      let res;
+      try {
+        res = await fetch(`/api/v1/records/vault/objects/${id}`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/octet-stream' },
+          body: sealed,
+        });
+      } finally {
+        sealed.fill(0);
+      }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `Encrypted upload failed (${res.status})`);
+      uploaded.push(id);
+      entries.push(metadata);
+    }
+    await changeRecordVaultManifest(userId, entries);
+    return entries.length;
+  } catch (err) {
+    await Promise.allSettled(uploaded.map((id) => api('DELETE', `/records/vault/objects/${id}`)));
+    throw err;
+  }
+}
+
+async function downloadRecordVaultFile(file) {
+  const res = await fetch(`/api/v1/records/vault/objects/${file.id}`, { credentials: 'same-origin' });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error ?? `Encrypted file unavailable (${res.status})`);
+  }
+  const sealed = new Uint8Array(await res.arrayBuffer());
+  const clear = await recordVaultCrypto.decryptObject(recordVaultHandle, recordVaultUserId, file.id, sealed);
+  sealed.fill(0);
+  let unpacked;
+  try {
+    unpacked = recordVaultCrypto.unpackFile(clear);
+  } finally {
+    clear.fill(0);
+  }
+  if (unpacked.metadata.id !== file.id || unpacked.metadata.size !== unpacked.bytes.byteLength) {
+    unpacked.bytes.fill(0);
+    throw new Error('The decrypted file does not match its encrypted index.');
+  }
+  const blob = new Blob([unpacked.bytes], { type: unpacked.metadata.type || 'application/octet-stream' });
+  unpacked.bytes.fill(0);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = unpacked.metadata.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  recordVaultLockTimer && clearTimeout(recordVaultLockTimer);
+  recordVaultLockTimer = setTimeout(() => {
+    lockRecordVault();
+    if (location.pathname === '/portal/records') render().catch(() => {});
+  }, 15 * 60 * 1000);
+}
+
+function recordVaultCard(status, files, manifestError, userId) {
+  const unlocked = Boolean(recordVaultHandle && recordVaultUserId === userId);
+  let content;
+  if (!status.configured) {
+    content = `<p class="dim small">Create a separate vault passphrase and recovery key. Your account sign-in does not unlock this vault. Files are encrypted in this browser before upload.</p>
+      <form id="record-vault-setup" class="stack" style="max-width:440px">
+        <label class="f">Vault passphrase<input name="passphrase" type="password" minlength="16" maxlength="1024" autocomplete="new-password" required></label>
+        <label class="f">Repeat passphrase<input name="confirm" type="password" minlength="16" maxlength="1024" autocomplete="new-password" required></label>
+        <p class="err" data-vault-error></p><button class="btn primary" type="submit">Create encrypted vault</button>
+      </form>`;
+  } else if (!unlocked) {
+    content = `<p class="dim small">This vault has ${status.objects} encrypted file${status.objects === 1 ? '' : 's'}. Unlock it with the vault passphrase. The server has only ciphertext and cannot reset the passphrase.</p>
+      <form id="record-vault-unlock" class="row" style="align-items:end;gap:10px;max-width:520px">
+        <label class="f" style="flex:1">Vault passphrase<input name="passphrase" type="password" maxlength="1024" autocomplete="current-password" required></label>
+        <button class="btn primary" type="submit">Unlock</button>
+      </form>
+      <p class="err" data-vault-error></p><button class="link" id="record-vault-recover" type="button">Unlock with recovery key and set a new passphrase</button>`;
+  } else {
+    const rows = files.map((file) => `<li><span><b>${esc(file.name)}</b><div class="sub">${esc(file.category)} · ${fmtSize(file.size)}${file.imported_at ? ` · ${fmtDate(file.imported_at)}` : ''}</div></span>
+      <span class="row" style="gap:6px"><button class="sm" data-vault-download="${file.id}">Download</button><button class="sm danger" data-vault-delete="${file.id}">Delete</button></span></li>`).join('');
+    content = `<p class="dim small">Unlocked in this browser only · ${files.length} file${files.length === 1 ? '' : 's'} · ${fmtSize(files.reduce((n, f) => n + f.size, 0))}. Metadata is encrypted too. The vault locks when you sign out, close this page, or after 15 minutes.</p>
+      ${manifestError ? `<p class="err">${esc(manifestError)}</p>` : ''}
+      <form id="record-vault-import" class="row" style="align-items:end;gap:10px"><label class="f" style="flex:1">Files<input type="file" name="files" multiple accept=".pdf,.json,.xml,.txt,.csv,.zip,.dcm,application/pdf,application/json,application/xml,text/plain,application/zip,application/dicom"></label><button class="btn primary" type="submit">Encrypt and import</button></form>
+      <p class="err" data-vault-error></p>
+      ${rows ? `<ul class="list">${rows}</ul>` : '<div class="empty">No encrypted files yet. Choose portal downloads above to add them.</div>'}
+      <div class="row" style="gap:10px"><button class="sm" id="record-vault-lock" type="button">Lock vault</button><button class="sm danger" id="record-vault-destroy" type="button">Delete encrypted vault</button></div>`;
+  }
+  return `<section class="card" id="record-vault-card"><div class="card-h"><h2>End-to-end encrypted record vault</h2><span class="badge b-ok">E2EE</span></div><div class="card-b stack">
+    <p class="small" style="margin:0">This vault encrypts files on your device before upload. tleehealth stores encrypted bytes, encrypted filenames and an encrypted index; it cannot read the vault contents. Losing both the passphrase and recovery key makes the vault unrecoverable.</p>
+    ${content}
+  </div></section>`;
+}
+
+function showRecordVaultRecoveryKey({ title, recoveryKey, handle, userId, envelope }) {
+  let saved = false;
+  modal.innerHTML = `<div class="m-h"><h2>${esc(title)}</h2><button type="button" class="sm" data-close aria-label="Close">Close</button></div><div class="m-b stack">
+    <p>Save this recovery key somewhere separate from your device. It can unlock every file in this vault. tleehealth cannot replace it.</p>
+    <textarea id="record-vault-recovery-key" readonly rows="3" style="width:100%;font-family:monospace;overflow-wrap:anywhere">${esc(recoveryKey)}</textarea>
+    <button type="button" class="sm" id="record-vault-copy-recovery">Copy recovery key</button>
+    <form id="record-vault-confirm-recovery" class="stack"><label class="row small" style="gap:8px"><input type="checkbox" name="saved" required style="width:auto"> I saved this recovery key.</label><p class="err" data-vault-error></p><button class="btn primary" type="submit">Save key and finish</button></form>
+  </div>`;
+  modal.showModal();
+  modal.querySelector('[data-close]').onclick = () => modal.close();
+  modal.querySelector('#record-vault-copy-recovery').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(recoveryKey);
+      toast('Recovery key copied');
+    } catch {
+      const field = modal.querySelector('#record-vault-recovery-key');
+      field.focus();
+      field.select();
+      toast('Select and copy the recovery key');
+    }
+  };
+  modal.addEventListener('close', () => {
+    const field = modal.querySelector('#record-vault-recovery-key');
+    if (field) field.value = '';
+    if (!saved) recordVaultCrypto.lockVault(handle);
+    modal.replaceChildren();
+  }, { once: true });
+  modal.querySelector('#record-vault-confirm-recovery').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const button = form.querySelector('button[type=submit]');
+    const error = form.querySelector('[data-vault-error]');
+    error.textContent = '';
+    button.disabled = true;
+    try {
+      await api('PUT', '/records/vault/key', envelope);
+      unlockRecordVault(handle, userId);
+      saved = true;
+      modal.close();
+      toast('Encrypted vault ready');
+      await render();
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
+}
+
+function openRecordVaultRecovery(status, userId) {
+  modal.innerHTML = `<div class="m-h"><h2>Recover encrypted vault</h2><button type="button" class="sm" data-close aria-label="Close">Close</button></div><div class="m-b">
+    <form id="record-vault-recovery-form" class="stack"><label class="f">Recovery key<textarea name="recoveryKey" rows="3" autocomplete="off" required></textarea></label>
+      <label class="f">New vault passphrase<input name="passphrase" type="password" minlength="16" maxlength="1024" autocomplete="new-password" required></label>
+      <label class="f">Repeat new passphrase<input name="confirm" type="password" minlength="16" maxlength="1024" autocomplete="new-password" required></label>
+      <p class="err" data-vault-error></p><button class="btn primary" type="submit">Recover and rotate keys</button></form>
+  </div>`;
+  modal.showModal();
+  modal.querySelector('[data-close]').onclick = () => modal.close();
+  modal.querySelector('#record-vault-recovery-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const values = formData(form);
+    const button = form.querySelector('button[type=submit]');
+    const error = form.querySelector('[data-vault-error]');
+    error.textContent = '';
+    if (values.passphrase !== values.confirm) {
+      error.textContent = 'The new passphrases do not match.';
+      return;
+    }
+    button.disabled = true;
+    let handle;
+    try {
+      handle = await recordVaultCrypto.unlockWithRecoveryKey(userId, values.recoveryKey, status.envelope);
+      const rotated = await recordVaultCrypto.rewrapVaultKey(userId, handle, values.passphrase);
+      modal.close();
+      showRecordVaultRecoveryKey({
+        title: 'Save your new recovery key',
+        recoveryKey: rotated.recoveryKey,
+        handle,
+        userId,
+        envelope: rotated.envelope,
+      });
+    } catch (err) {
+      if (handle) recordVaultCrypto.lockVault(handle);
+      error.textContent = err.message;
+    } finally {
+      values.recoveryKey = '';
+      values.passphrase = '';
+      values.confirm = '';
+      form.querySelectorAll('input,textarea').forEach((field) => { field.value = ''; });
+      button.disabled = false;
+    }
+  };
+}
+
+async function bindRecordVault(status, userId) {
+  const setError = (form, err) => {
+    const target = form.querySelector('[data-vault-error]');
+    if (target) target.textContent = err.message;
+    else toast(err.message, true);
+  };
+  const setup = root.querySelector('#record-vault-setup');
+  if (setup) setup.onsubmit = async (e) => {
+    e.preventDefault();
+    const values = formData(setup);
+    const button = setup.querySelector('button[type=submit]');
+    const error = setup.querySelector('[data-vault-error]');
+    error.textContent = '';
+    if (values.passphrase !== values.confirm) {
+      error.textContent = 'The passphrases do not match.';
+      return;
+    }
+    button.disabled = true;
+    try {
+      const created = await recordVaultCrypto.createVault(userId, values.passphrase);
+      values.passphrase = '';
+      values.confirm = '';
+      setup.reset();
+      showRecordVaultRecoveryKey({
+        title: 'Save your recovery key',
+        recoveryKey: created.recoveryKey,
+        handle: created.handle,
+        userId,
+        envelope: created.envelope,
+      });
+    } catch (err) {
+      setError(setup, err);
+    } finally {
+      setup.querySelectorAll('input[type=password]').forEach((input) => { input.value = ''; });
+      button.disabled = false;
+    }
+  };
+
+  const unlock = root.querySelector('#record-vault-unlock');
+  if (unlock) unlock.onsubmit = async (e) => {
+    e.preventDefault();
+    const button = unlock.querySelector('button[type=submit]');
+    const error = unlock.parentElement.querySelector('[data-vault-error]');
+    error.textContent = '';
+    let passphrase = formData(unlock).passphrase;
+    unlock.querySelector('input[type=password]').value = '';
+    button.disabled = true;
+    try {
+      const handle = await recordVaultCrypto.unlockWithPassphrase(userId, passphrase, status.envelope);
+      unlockRecordVault(handle, userId);
+      await render();
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      passphrase = '';
+      unlock.querySelector('input[type=password]').value = '';
+      button.disabled = false;
+    }
+  };
+  root.querySelector('#record-vault-recover')?.addEventListener('click', () => openRecordVaultRecovery(status, userId));
+
+  const upload = root.querySelector('#record-vault-import');
+  if (upload) upload.onsubmit = async (e) => {
+    e.preventDefault();
+    const files = [...upload.querySelector('input[type=file]').files];
+    const button = upload.querySelector('button[type=submit]');
+    const error = upload.parentElement.querySelector('[data-vault-error]');
+    error.textContent = '';
+    if (!files.length) { error.textContent = 'Choose at least one file.'; return; }
+    if (files.some((f) => f.size > RECORD_VAULT_MAX_FILE_BYTES)) { error.textContent = 'Each file must be 100 MB or smaller.'; return; }
+    if (files.reduce((n, f) => n + f.size, 0) > RECORD_VAULT_MAX_BATCH_BYTES) { error.textContent = 'Choose files totaling 300 MB or less per import.'; return; }
+    button.disabled = true;
+    button.textContent = 'Encrypting…';
+    try {
+      const count = await uploadRecordVaultFiles(files);
+      toast(`${count} file${count === 1 ? '' : 's'} encrypted and imported`);
+      await render();
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Encrypt and import';
+    }
+  };
+
+  root.querySelectorAll('[data-vault-download]').forEach((button) => button.onclick = async () => {
+    const file = status.files.find((f) => f.id === button.dataset.vaultDownload);
+    if (!file) return;
+    button.disabled = true;
+    try { await downloadRecordVaultFile(file); }
+    catch (err) { toast(err.message, true); }
+    finally { button.disabled = false; }
+  });
+  root.querySelectorAll('[data-vault-delete]').forEach((button) => button.onclick = async () => {
+    const id = button.dataset.vaultDelete;
+    const file = status.files.find((f) => f.id === id);
+    if (!file || !confirm(`Delete ${file.name} from the encrypted vault? This cannot be undone.`)) return;
+    button.disabled = true;
+    try {
+      await changeRecordVaultManifest(userId, [], [id]);
+      await api('DELETE', `/records/vault/objects/${id}`);
+      toast('Encrypted file deleted');
+      await render();
+    } catch (err) {
+      toast(err.message, true);
+      button.disabled = false;
+    }
+  });
+  root.querySelector('#record-vault-lock')?.addEventListener('click', async () => {
+    lockRecordVault();
+    await render();
+  });
+  root.querySelector('#record-vault-destroy')?.addEventListener('click', async () => {
+    if (!confirm('Permanently delete this encrypted vault, its recovery envelope, index and every encrypted file? This cannot be undone.')) return;
+    try {
+      await api('DELETE', '/records/vault');
+      lockRecordVault();
+      toast('Encrypted vault deleted');
+      await render();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
 async function renderRecords(q) {
   clearTimeout(recordsPoll);
-  const data = await get('/records');
+  const userId = state.me?.user?.id;
+  if (recordVaultHandle && recordVaultUserId !== userId) lockRecordVault();
+  const [data, vaultStatus] = await Promise.all([get('/records'), get('/records/vault')]);
+  if (!vaultStatus.configured) lockRecordVault();
+  let vaultFiles = [];
+  let vaultManifestError = null;
+  if (vaultStatus.configured && recordVaultHandle && recordVaultUserId === userId) {
+    try {
+      vaultFiles = (await readRecordVaultManifest(userId)).files;
+    } catch (err) {
+      vaultManifestError = err.message;
+    }
+  }
+  vaultStatus.files = vaultFiles;
   const category = q.get('category');
   const items = category ? (await get(`/records/items?category=${encodeURIComponent(category)}&limit=500`)).items : null;
   const syncing = data.connections.some((c) => c.status === 'syncing');
@@ -1569,14 +2040,15 @@ async function renderRecords(q) {
     ${portalHead('/portal/records')}
     <h1>Your health records</h1>
     ${q.get('error') ? `<section class="card"><div class="card-b"><span class="badge b-alert">not connected</span> ${esc(q.get('error'))}</div></section>` : ''}
-    <section class="card"><div class="card-h"><h2>Connected providers</h2>${data.total ? `<span class="row" style="gap:6px"><a class="btn sm primary" href="/api/v1/records/export">Download everything</a><a class="btn sm" href="/api/v1/records/export?format=bundle" title="One HL7 FHIR file other health apps can import">FHIR</a></span>` : ''}</div>${connections}</section>
+    ${recordVaultCard(vaultStatus, vaultFiles, vaultManifestError, userId)}
+    <section class="card"><div class="card-h"><h2>Existing and shared records (server-readable)</h2>${data.total ? `<span class="row" style="gap:6px"><a class="btn sm primary" href="/api/v1/records/export">Download everything</a><a class="btn sm" href="/api/v1/records/export?format=bundle" title="One HL7 FHIR file other health apps can import">FHIR</a></span>` : ''}</div><div class="card-b small dim">These older imports remain readable by tleehealth and may be shared with your practice. They are separate from the encrypted vault above.</div>${connections}</section>
     <section class="card"><div class="card-h"><h2>Find your provider</h2></div><div class="card-b stack">
       <p class="dim small" style="margin:0">Find your MyChart or health system here, then download your records from its portal and import them below. Automatic connections are paused while we finish provider approvals.</p>
       <input id="prov-q" placeholder="Search: OCHIN, hospital, or clinic" autocomplete="off" aria-label="Search providers">
       <ul class="list" id="prov-list" style="padding:0"></ul>
     </div></section>
-    <section class="card"><div class="card-h"><h2>Import a MyChart download</h2></div><div class="card-b stack">
-      <p class="dim small" style="margin:0">Download a PDF, CCD/C-CDA, ZIP, lab report, or MRI/DICOM file from MyChart, then upload it here. Manual import is the current connection method.</p>
+    <section class="card"><div class="card-h"><h2>Legacy import (server-readable)</h2></div><div class="card-b stack">
+      <p class="dim small" style="margin:0">This older import path sends readable files to tleehealth for processing and may be shared with a practice. Use the encrypted vault above if you want files that tleehealth cannot read.</p>
       <form id="manual-import" class="row" style="align-items:end;gap:10px"><label class="f" style="flex:1">Files<input type="file" name="files" multiple accept=".pdf,.json,.xml,.txt,.csv,.zip,.dcm,application/pdf,application/json,application/xml,text/plain,application/zip,application/dicom"></label><button class="btn primary" type="submit">Import files</button></form>
       <p class="err" id="manual-import-error"></p>
     </div></section>
@@ -1591,6 +2063,7 @@ async function renderRecords(q) {
   </div>`;
 
   document.getElementById('signout').onclick = signOut;
+  await bindRecordVault(vaultStatus, userId);
   if (q.get('connected')) {
     toast(syncing ? 'Connected. Importing your records…' : 'Connected. Your records are in.');
     history.replaceState({}, '', '/portal/records');

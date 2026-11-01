@@ -15,13 +15,13 @@ share with a practice. Automatic provider connections are paused: `POST
 /api/v1/records/connect` returns 410. The SMART/FHIR importer remains in the codebase,
 but is not the current import path.
 
-**Encryption status:** patient login and provider-token sealing do not make imported
-medical records end-to-end encrypted. Uploaded files and derived record data are
-currently stored as readable JSON and bytes in the application database, and the API,
-CLI and MCP can return their contents. The server receives and processes the uploaded
-files before storing them. See
-[`docs/e2ee-record-vault.md`](docs/e2ee-record-vault.md) for the E2EE feasibility and
-migration design. Do not describe the current records feature as E2EE.
+**End-to-end encrypted personal vault:** the PWA and CLI can encrypt user-selected
+files on-device before upload. The API stores ciphertext and an encrypted index;
+MCP exposes opaque status only and cannot decrypt the vault. Existing imported
+records, old file uploads, provider sync, exports and clinic charts remain
+server-readable. There is no desktop app, E2EE provider sync or E2EE chat in this
+repository. See [`docs/e2ee-record-vault.md`](docs/e2ee-record-vault.md) for the
+exact boundary, recovery behavior and metadata the server can see.
 
 **Pricing:** each org pays for every user on its team: $10/seat/month, or $199/month for
 up to 1,000 seats, whichever is lower. Patients and leads are free.
@@ -37,7 +37,7 @@ up to 1,000 seats, whichever is lower. Patients and leads are free.
 | `design` | the design canvas artboards (`*.dc.html`); `python3 design/build.py` regenerates the landing page |
 | `packages/cli` | `@profullstack/tleehealth`: CLI, hqtui front-desk TUI (`tleehealth tui`), API client |
 | `packages/mcp` | `@profullstack/tleehealth-mcp`: MCP server over stdio |
-| `docs/e2ee-record-vault.md` | E2EE boundary, feasibility and staged migration design |
+| `docs/e2ee-record-vault.md` | E2EE vault protocol, limits and legacy-data boundary |
 | `bin/install.sh` | `curl -fsSL https://tleehealth.com/install.sh \| sh` |
 
 ```sh
@@ -52,7 +52,8 @@ bun run dev        # http://localhost:3000 (without RESEND_API_KEY the sign-in l
   `/home/anthony/www/tleehealth.com/deploy-app.sh <sha>` on dev2 (provisioned by
   `cli-tools/dev2/dev2-site`, entry `sites.d/tleehealth.com.json`). Secrets come from
   the logicsrc vault `tleehealth.com--prod` at deploy time, never from a committed `.env`.
-- **Release:** bump `version` in both `packages/*/package.json` and merge. `release.yml`
-  tags `vX.Y.Z`, creates the GitHub release and publishes both packages to npm.
+- **Release:** bump the matching `packages/cli` and `packages/mcp` versions and merge.
+  `release.yml` tags that CLI version, creates the GitHub release, and publishes the
+  shared vault crypto package, CLI and MCP package to npm in dependency order.
 
 The API is listed at https://tleehealth.com/llms.txt.
