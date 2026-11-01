@@ -19,7 +19,8 @@
   },
   "exports": {
     ".": "./src/cli.js",
-    "./client": "./src/client.js"
+    "./client": "./src/client.js",
+    "./vault": "./src/vault-crypto.js"
   },
   "files": [
     "bin",
@@ -27,8 +28,7 @@
     "README.md"
   ],
   "dependencies": {
-    "@profullstack/hqtui": "^0.11.1",
-    "@profullstack/tleehealth-vault": "^0.1.0"
+    "@profullstack/hqtui": "^0.11.1"
   },
   "keywords": [
     "telehealth",

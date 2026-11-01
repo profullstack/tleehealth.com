@@ -9,7 +9,8 @@ envelope, ciphertext and the minimum routing data needed to store and return it.
 The API has no decrypt, search, preview, export or plaintext import route for
 vault objects.
 
-The PWA and CLI share the versioned `@profullstack/tleehealth-vault` format:
+The PWA and CLI share the versioned crypto module exported as
+`@profullstack/tleehealth/vault`:
 
 - A random 256-bit data key encrypts files and the index with AES-256-GCM.
 - A user passphrase wraps that key with PBKDF2-HMAC-SHA-256 (600,000 iterations)

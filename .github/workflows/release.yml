@@ -1,5 +1,5 @@
 # Release after merge, by default: every push to master whose package version has
-# no tag yet becomes a GitHub release and an npm publish of the CLI, MCP and shared crypto packages. One
+# no tag yet becomes a GitHub release and an npm publish of both packages. One
 # workflow on purpose: a release made with GITHUB_TOKEN does not trigger other
 # workflows, so a separate "on: release" publish would never run.
 #
@@ -67,7 +67,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.v.outputs.version }}
         run: |
-          for dir in packages/vault-crypto packages/cli packages/mcp; do
+          for dir in packages/cli packages/mcp; do
             name=$(node -p "require('./$dir/package.json').name")
             version=$(node -p "require('./$dir/package.json').version")
             if npm view "$name@$version" version >/dev/null 2>&1; then

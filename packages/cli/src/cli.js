@@ -27,7 +27,7 @@ import { createInterface } from 'node:readline/promises';
 import {
   createVault, decryptObject, encryptObject, lockVault, packFile, rewrapVaultKey,
   unlockWithPassphrase, unlockWithRecoveryKey, unpackFile,
-} from '@profullstack/tleehealth-vault';
+} from './vault-crypto.js';
 import {
   caseload, connect, connection, disconnect, exportRecords, health, logTime, providers, recordAccess, recordFile, recordItems, records,
   deleteRecordVault, deleteRecordVaultObject, downloadRecordVaultObject, me, readRecordVaultManifest,

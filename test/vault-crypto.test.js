@@ -10,7 +10,7 @@ import {
   unlockWithRecoveryKey,
   unpackFile,
   validateVaultEnvelope,
-} from '../packages/vault-crypto/src/index.js';
+} from '../packages/cli/src/vault-crypto.js';
 
 const userId = '24c6dd3b-39dc-43e6-b531-a1632aa53bc1';
 const objectId = 'd275a073-30ca-4b04-8b99-0bc705736b3a';

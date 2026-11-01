@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { configured, close } from '../packages/db/src/index.js';
 import { migrate } from '../packages/db/src/migrate.js';
 import * as records from '../apps/web/src/records.js';
-import { createVault, decryptObject, encryptObject, lockVault, rewrapVaultKey, unlockWithPassphrase } from '../packages/vault-crypto/src/index.js';
+import { createVault, decryptObject, encryptObject, lockVault, rewrapVaultKey, unlockWithPassphrase } from '../packages/cli/src/vault-crypto.js';
 import * as vault from '../apps/web/src/token-vault.js';
 const { UnlockStore } = vault;
 import { crc32, zip } from '../apps/web/src/zip.js';

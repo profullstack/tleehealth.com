@@ -1,5 +1,5 @@
 import { db } from '@tleehealth/db';
-import { validateVaultEnvelope } from '@profullstack/tleehealth-vault';
+import { validateVaultEnvelope } from '@profullstack/tleehealth/vault';
 
 export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 // Metadata is inside the ciphertext (64 KiB plus framing); AES-GCM adds a nonce and tag.

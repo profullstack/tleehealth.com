@@ -20,7 +20,7 @@ const pub = (name) => readFileSync(join(here, '..', 'public', name));
 const root = join(here, '..', '..', '..');
 const VERSION = JSON.parse(readFileSync(join(root, 'packages/cli/package.json'), 'utf8')).version;
 const INSTALL_SH = readFileSync(join(root, 'bin/install.sh'), 'utf8');
-const RECORD_VAULT_CRYPTO_JS = readFileSync(join(root, 'packages/vault-crypto/src/index.js'));
+const RECORD_VAULT_CRYPTO_JS = readFileSync(join(root, 'packages/cli/src/vault-crypto.js'));
 
 export const app = new Hono();
 

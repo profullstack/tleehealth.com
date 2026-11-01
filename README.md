@@ -53,7 +53,7 @@ bun run dev        # http://localhost:3000 (without RESEND_API_KEY the sign-in l
   `cli-tools/dev2/dev2-site`, entry `sites.d/tleehealth.com.json`). Secrets come from
   the logicsrc vault `tleehealth.com--prod` at deploy time, never from a committed `.env`.
 - **Release:** bump the matching `packages/cli` and `packages/mcp` versions and merge.
-  `release.yml` tags that CLI version, creates the GitHub release, and publishes the
-  shared vault crypto package, CLI and MCP package to npm in dependency order.
+  `release.yml` tags that CLI version, creates the GitHub release, and publishes both
+  packages to npm. The CLI package exports the shared vault crypto module.
 
 The API is listed at https://tleehealth.com/llms.txt.
