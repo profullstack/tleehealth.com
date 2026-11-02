@@ -46,9 +46,9 @@ function assertUserId(userId) {
   }
 }
 
-function assertPassphrase(passphrase) {
-  if (typeof passphrase !== 'string' || passphrase.normalize('NFC').length < 16) {
-    throw new Error('Use a passphrase with at least 16 characters.');
+function assertPassphrase(passphrase, minLength = 16) {
+  if (typeof passphrase !== 'string' || passphrase.normalize('NFC').length < minLength) {
+    throw new Error(`Use a passphrase with at least ${minLength} characters.`);
   }
   if (passphrase.length > 1024) throw new Error('Passphrase is too long.');
 }
@@ -64,8 +64,8 @@ function aadForObject(userId, objectId) {
   return encoder.encode(`tleehealth:record-vault:object:v${FORMAT_VERSION}:${userId}:${objectId}`);
 }
 
-async function derivePassphraseKey(passphrase, salt) {
-  assertPassphrase(passphrase);
+async function derivePassphraseKey(passphrase, salt, minLength = 16) {
+  assertPassphrase(passphrase, minLength);
   const crypto = webcrypto();
   const passphraseBytes = encoder.encode(passphrase.normalize('NFC'));
   try {
@@ -133,16 +133,16 @@ export function lockVault(handle) {
   handles.delete(handle);
 }
 
-export async function createVault(userId, passphrase) {
+export async function createVault(userId, passphrase, { minLength = 16 } = {}) {
   assertUserId(userId);
-  assertPassphrase(passphrase);
+  assertPassphrase(passphrase, minLength);
   const rawKey = randomBytes(32);
   const salt = randomBytes(16);
   const recoveryBytes = randomBytes(32);
   try {
     const keyCheck = await makeKeyCheck(rawKey, userId);
     const [passphraseWrap, recoveryWrap] = await Promise.all([
-      wrap(rawKey, await derivePassphraseKey(passphrase, salt), aadForKey(userId, 'passphrase')),
+      wrap(rawKey, await derivePassphraseKey(passphrase, salt, minLength), aadForKey(userId, 'passphrase')),
       wrap(rawKey, await importAesKey(recoveryBytes), aadForKey(userId, 'recovery')),
     ]);
     return {
@@ -182,13 +182,13 @@ export function validateVaultEnvelope(envelope) {
   return envelope;
 }
 
-export async function unlockWithPassphrase(userId, passphrase, untrustedEnvelope) {
+export async function unlockWithPassphrase(userId, passphrase, untrustedEnvelope, { minLength = 16 } = {}) {
   const envelope = validateVaultEnvelope(untrustedEnvelope);
   let rawKey;
   try {
     rawKey = await unwrap(
       envelope.passphrase,
-      await derivePassphraseKey(passphrase, fromBase64Url(envelope.passphrase.salt)),
+      await derivePassphraseKey(passphrase, fromBase64Url(envelope.passphrase.salt), minLength),
       aadForKey(userId, 'passphrase'),
     );
     return makeHandle(rawKey);

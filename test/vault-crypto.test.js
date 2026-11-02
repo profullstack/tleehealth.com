@@ -57,6 +57,11 @@ describe('personal record vault cryptography', () => {
 
   test('rejects weak passphrases and malformed key envelopes', async () => {
     await expect(createVault(userId, 'too short')).rejects.toThrow('at least 16 characters');
+    await expect(createVault(userId, '12345', { minLength: 6 })).rejects.toThrow('at least 6 characters');
+    const shortPassphrase = await createVault(userId, '123456', { minLength: 6 });
+    const unlocked = await unlockWithPassphrase(userId, '123456', shortPassphrase.envelope, { minLength: 6 });
+    lockVault(shortPassphrase.handle);
+    lockVault(unlocked);
     expect(() => validateVaultEnvelope({ version: 1, cipher: 'AES-ECB' })).toThrow('invalid vault key envelope');
   });
 });

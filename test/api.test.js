@@ -64,7 +64,9 @@ describe.skipIf(!configured())('api', () => {
     const page = await app.request('/health/', { headers: { cookie } });
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('Sign in to record measurements');
-    expect((await app.request('/health/health.js', { headers: { cookie } })).status).toBe(200);
+    const trackerScript = await app.request('/health/health.js', { headers: { cookie } });
+    expect(trackerScript.status).toBe(200);
+    expect(await trackerScript.text()).toContain('minlength="6"');
   });
 
   test('CoinPay links to the signed-in account by provider subject and signs into that account', async () => {

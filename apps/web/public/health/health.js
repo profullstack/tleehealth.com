@@ -194,10 +194,10 @@ async function showGate(message = '') {
   if (!config) {
     vaultScreen.innerHTML = `
       <p class="eyebrow">First visit</p><h2>Create your encrypted tracker</h2>
-      <p>Choose a passphrase with at least 16 characters. The tracker encrypts every reading in your browser before saving it.</p>
+      <p>Choose a passphrase with at least 6 characters. The tracker encrypts every reading in your browser before saving it.</p>
       <form id="setup-form" class="gate-form">
-        <label>Passphrase<input name="passphrase" type="password" autocomplete="new-password" minlength="16" required></label>
-        <label>Confirm passphrase<input name="confirm" type="password" autocomplete="new-password" minlength="16" required></label>
+        <label>Passphrase<input name="passphrase" type="password" autocomplete="new-password" minlength="6" required></label>
+        <label>Confirm passphrase<input name="confirm" type="password" autocomplete="new-password" minlength="6" required></label>
         <button class="primary" type="submit">Create private tracker</button><p class="hint" id="gate-message" role="status">${message}</p>
       </form>
       <label class="import">Import encrypted backup<input id="gate-import" type="file" accept="application/json,.json"></label>`;
@@ -255,7 +255,7 @@ async function createLocalVault(event) {
   if (passphrase !== confirm) { message.textContent = 'The passphrases do not match.'; return; }
   try {
     const userId = makeId();
-    const created = await vaultCrypto.createVault(userId, passphrase);
+    const created = await vaultCrypto.createVault(userId, passphrase, { minLength: 6 });
     await putVault({ userId, envelope: created.envelope });
     vaultHandle = created.handle;
     vaultUserId = userId;
@@ -272,7 +272,7 @@ async function unlockWithPassphrase(event) {
   const message = document.getElementById('gate-message');
   try {
     const config = await getVault();
-    const handle = await vaultCrypto.unlockWithPassphrase(config.userId, passphrase, config.envelope);
+    const handle = await vaultCrypto.unlockWithPassphrase(config.userId, passphrase, config.envelope, { minLength: 6 });
     unlockForm.reset();
     activateVault(handle, config.userId);
   } catch (err) {
