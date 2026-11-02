@@ -1,5 +1,11 @@
 import * as vaultCrypto from '/assets/vault-crypto.js';
 
+const sessionResponse = await fetch('/api/v1/me', { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
+if (!sessionResponse?.ok) {
+  location.replace('/signin?next=%2Fhealth%2F');
+  throw new Error('Sign in required to use the health tracker.');
+}
+
 const DB_NAME = 'tleehealth-health-tracker';
 const DB_VERSION = 2;
 const RECORDS = 'readings';
@@ -397,6 +403,24 @@ document.getElementById('lock').addEventListener('click', lockTracker);
 
 window.addEventListener('pointerdown', resetIdleTimer, { passive: true });
 window.addEventListener('keydown', resetIdleTimer);
+async function checkAccountSession() {
+  try {
+    const response = await fetch('/api/v1/me', { credentials: 'same-origin', cache: 'no-store' });
+    if (response.ok) return;
+  } catch {}
+  lockTracker();
+  location.replace('/signin?next=%2Fhealth%2F');
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') {
+    lockTracker();
+    return;
+  }
+  checkAccountSession();
+});
+setInterval(() => {
+  if (document.visibilityState === 'visible') checkAccountSession();
+}, 60_000);
 window.addEventListener('pagehide', () => {
   if (vaultHandle) vaultCrypto.lockVault(vaultHandle);
   vaultHandle = null;

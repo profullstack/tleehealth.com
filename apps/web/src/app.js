@@ -43,24 +43,29 @@ const page = async (c, name) =>
 app.get('/', (c) => page(c, 'index.html'));
 app.get('/healthz', (c) => c.text('ok'));
 
-// The personal health tracker is a local-first PWA. It has no account or API
-// calls; readings live in the visitor's IndexedDB and never reach the server.
-app.get('/health', (c) => c.redirect('/health/', 301));
-app.get('/health/', (c) =>
-  c.body(pub('health/index.html'), 200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' }),
-);
-app.get('/health/health.css', (c) =>
-  c.body(pub('health/health.css'), 200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'no-cache' }),
-);
-app.get('/health/health.js', (c) =>
-  c.body(pub('health/health.js'), 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
-);
-app.get('/health/manifest.webmanifest', (c) =>
-  c.body(pub('health/manifest.webmanifest'), 200, { 'content-type': 'application/manifest+json', 'cache-control': 'no-cache' }),
-);
-app.get('/health/sw.js', (c) =>
-  c.body(pub('health/sw.js'), 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'service-worker-allowed': '/health/' }),
-);
+// Tracker readings stay encrypted in this browser, but opening the app requires
+// an active account session. Keep every route under /health behind that session.
+const healthUser = (c) => auth.userFromSession(getCookie(c, config.session.cookie));
+const healthSignIn = (c) => {
+  c.header('cache-control', 'no-store');
+  return c.redirect('/signin?next=%2Fhealth%2F', 302);
+};
+const healthAsset = (name, type, headers = {}) => async (c) => {
+  if (!(await healthUser(c))) return c.body(null, 401, { 'cache-control': 'no-store' });
+  return c.body(pub(`health/${name}`), 200, { 'content-type': type, 'cache-control': 'private, no-store', ...headers });
+};
+app.get('/health', async (c) => {
+  if (!(await healthUser(c))) return healthSignIn(c);
+  return c.redirect('/health/', 301);
+});
+app.get('/health/', async (c) => {
+  if (!(await healthUser(c))) return healthSignIn(c);
+  return c.body(pub('health/index.html'), 200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store' });
+});
+app.get('/health/health.css', healthAsset('health.css', 'text/css; charset=utf-8'));
+app.get('/health/health.js', healthAsset('health.js', 'text/javascript; charset=utf-8'));
+app.get('/health/manifest.webmanifest', healthAsset('manifest.webmanifest', 'application/manifest+json'));
+app.get('/health/sw.js', healthAsset('sw.js', 'text/javascript; charset=utf-8', { 'service-worker-allowed': '/health/' }));
 
 // The app: one shell for the team, patients and sign-in. It talks only to /api/v1.
 // The shared profile fields (@profullstack/profile) ride in the shell as a
@@ -124,7 +129,8 @@ app.get('/auth/coinpay', async (c) => {
     if (!user) return c.redirect('/signin?error=coinpay-link-session', 302);
     userId = user.id;
   }
-  const { state, challenge } = await auth.createCoinPayOAuthState(userId);
+  const next = c.req.query('next') === '/health/' ? '/health/' : null;
+  const { state, challenge } = await auth.createCoinPayOAuthState(userId, next);
   const authorize = new URL(config.coinpayOAuth.authorizeUrl);
   authorize.search = new URLSearchParams({
     response_type: 'code',
@@ -142,8 +148,9 @@ app.get('/auth/coinpay/callback', async (c) => {
   const query = c.req.query();
   const pending = await auth.takeCoinPayOAuthState(query.state);
   if (!pending) return c.redirect('/signin?error=coinpay-expired', 302);
-  if (query.error) return c.redirect(pending.userId ? '/app/account?coinpay=denied' : '/signin?error=coinpay-denied', 302);
-  if (!query.code) return c.redirect(pending.userId ? '/app/account?coinpay=failed' : '/signin?error=coinpay-failed', 302);
+  const signInError = (error) => `/signin?error=${error}${pending.next ? '&next=%2Fhealth%2F' : ''}`;
+  if (query.error) return c.redirect(pending.userId ? '/app/account?coinpay=denied' : signInError('coinpay-denied'), 302);
+  if (!query.code) return c.redirect(pending.userId ? '/app/account?coinpay=failed' : signInError('coinpay-failed'), 302);
 
   if (pending.userId) {
     const sessionUser = await auth.userFromSession(getCookie(c, config.session.cookie));
@@ -155,7 +162,7 @@ app.get('/auth/coinpay/callback', async (c) => {
   try {
     subject = await auth.coinPaySubjectFromCode(query.code, pending.codeVerifier);
   } catch {
-    return c.redirect(pending.userId ? '/app/account?coinpay=failed' : '/signin?error=coinpay-failed', 302);
+    return c.redirect(pending.userId ? '/app/account?coinpay=failed' : signInError('coinpay-failed'), 302);
   }
 
   if (pending.userId) {
@@ -165,9 +172,9 @@ app.get('/auth/coinpay/callback', async (c) => {
   }
 
   const session = await auth.signInWithCoinPay(subject, c.req.header('user-agent'));
-  if (!session) return c.redirect('/signin?error=coinpay-not-linked', 302);
+  if (!session) return c.redirect(signInError('coinpay-not-linked'), 302);
   c.header('set-cookie', auth.sessionCookie(session.sessionId));
-  return c.redirect('/app', 302);
+  return c.redirect(pending.next ?? '/app', 302);
 });
 
 // The emailed sign-in link lands here, sets the session and goes to the app.
@@ -177,8 +184,9 @@ app.get('/auth/magic', async (c) => {
   if (!s) return c.redirect('/signin?error=expired', 302);
   await saveSignup(s.user, s.profile);
   // The link proved the mailbox; a link that just created the account takes its invite.
-  let to = '/app';
-  if (s.created && s.invite) {
+  const requestedNext = c.req.query('next') === '/health/' ? '/health/' : null;
+  let to = requestedNext ?? '/app';
+  if (!requestedNext && s.created && s.invite) {
     try {
       const r = await credits.acceptInvite(s.user.id, s.invite);
       console.log(`[invite] ${s.user.id} ${r.ok ? 'accepted' : r.reason}`);
