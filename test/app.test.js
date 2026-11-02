@@ -58,9 +58,15 @@ describe('web', () => {
       expect(page.status).toBe(302);
       expect(page.headers.get('location')).toBe('/signin?next=%2Fhealth%2F');
     }
-    for (const path of ['/health/health.css', '/health/health.js', '/health/manifest.webmanifest', '/health/sw.js']) {
+    for (const path of ['/health/health.css', '/health/health.js', '/health/manifest.webmanifest']) {
       expect((await get(path)).status).toBe(401);
     }
+    const worker = await get('/health/sw.js');
+    expect(worker.status).toBe(200);
+    expect(worker.headers.get('service-worker-allowed')).toBe('/health/');
+    const workerSource = await worker.text();
+    expect(workerSource).toContain('tleehealth-health-v4');
+    expect(workerSource).toContain("client.navigate('/health/')");
   });
   test('patient portal links to the free local health tracker', async () => {
     const source = await (await get('/assets/app.js')).text();

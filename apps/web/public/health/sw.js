@@ -7,7 +7,17 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith('tleehealth-health-') && key !== CACHE).map((key) => caches.delete(key))))
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
+      .then(() => {
+        setTimeout(() => {
+          self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+            for (const client of clients) {
+              const path = new URL(client.url).pathname;
+              if (path === '/health' || path.startsWith('/health/')) client.navigate('/health/').catch(() => {});
+            }
+          });
+        }, 0);
+      }),
   );
 });
 

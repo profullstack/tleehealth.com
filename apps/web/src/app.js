@@ -65,7 +65,15 @@ app.get('/health/', async (c) => {
 app.get('/health/health.css', healthAsset('health.css', 'text/css; charset=utf-8'));
 app.get('/health/health.js', healthAsset('health.js', 'text/javascript; charset=utf-8'));
 app.get('/health/manifest.webmanifest', healthAsset('manifest.webmanifest', 'application/manifest+json'));
-app.get('/health/sw.js', healthAsset('sw.js', 'text/javascript; charset=utf-8', { 'service-worker-allowed': '/health/' }));
+// Keep the update script public so a logged-out installed copy can replace an
+// older cache-first worker and clear its cached tracker shell.
+app.get('/health/sw.js', (c) =>
+  c.body(pub('health/sw.js'), 200, {
+    'content-type': 'text/javascript; charset=utf-8',
+    'cache-control': 'no-cache',
+    'service-worker-allowed': '/health/',
+  }),
+);
 
 // The app: one shell for the team, patients and sign-in. It talks only to /api/v1.
 // The shared profile fields (@profullstack/profile) ride in the shell as a
