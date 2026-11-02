@@ -1,4 +1,4 @@
-const CACHE = 'tleehealth-health-v2';
+const CACHE = 'tleehealth-health-v3';
 const SHELL = ['/health/', '/health/health.css', '/health/health.js', '/health/manifest.webmanifest', '/assets/vault-crypto.js', '/icon.svg'];
 
 self.addEventListener('install', (event) => {

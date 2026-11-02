@@ -1551,6 +1551,7 @@ async function renderPortal() {
   root.innerHTML = `<div class="portal">
     ${portalHead('/portal')}
     <h1>${name ? `Hi, ${esc(name)}` : 'Your health'}</h1>
+    <section class="card"><div class="card-b row" style="justify-content:space-between"><span><b>Free health tracker</b><div class="dim small">Track readings like blood pressure, weight and glucose. Encrypted in your browser; no account required.</div></span><a class="btn primary sm" href="/health/">Open tracker</a></div></section>
     <section class="card"><div class="card-b row" style="justify-content:space-between"><span><b>Records from other providers</b><div class="dim small">Bring in visits, after-visit summaries, labs, imaging and notes from MyChart and other patient portals.</div></span><a class="btn sm" href="/portal/records">Health records</a></div></section>
     ${body}</div>`;
   document.getElementById('signout').onclick = signOut;
@@ -1569,7 +1570,7 @@ async function renderPortal() {
 function portalHead(path) {
   const link = (href, label) => `<a class="btn sm ${path === href ? 'primary' : ''}" href="${href}">${label}</a>`;
   return `<div class="head"><a class="brand" href="/portal" style="padding:0">${logo} tleehealth</a><div class="row">
-    ${link('/portal', 'Visits')}${link('/portal/records', 'Health records')}${link('/app/account', 'Account')}
+    ${link('/portal', 'Visits')}${link('/portal/records', 'Health records')}${link('/health/', 'Free tracker')}${link('/app/account', 'Account')}
     ${state.me.orgs.length ? '<a class="btn sm" href="/app">Practice</a>' : ''}<button class="sm" id="signout">Sign out</button></div></div>`;
 }
 

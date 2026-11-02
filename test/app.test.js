@@ -58,7 +58,9 @@ describe('web', () => {
     expect(redirect.headers.get('location')).toBe('/health/');
     const page = await get('/health/');
     expect(page.status).toBe(200);
-    expect(await page.text()).toContain('Encrypted on this device before saving');
+    const html = await page.text();
+    expect(html).toContain('Encrypted on this device before saving');
+    expect(html).toContain('href="/portal">My health portal');
     expect((await get('/health/health.css')).status).toBe(200);
     const script = await get('/health/health.js');
     expect(script.status).toBe(200);
@@ -70,7 +72,15 @@ describe('web', () => {
     const worker = await get('/health/sw.js');
     expect(worker.status).toBe(200);
     expect(worker.headers.get('service-worker-allowed')).toBe('/health/');
-    expect(await worker.text()).toContain('/assets/vault-crypto.js');
+    const workerSource = await worker.text();
+    expect(workerSource).toContain("tleehealth-health-v3");
+    expect(workerSource).toContain('/assets/vault-crypto.js');
+  });
+  test('patient portal links to the free local health tracker', async () => {
+    const source = await (await get('/assets/app.js')).text();
+    expect(source).toContain("link('/health/', 'Free tracker')");
+    expect(source).toContain('Free health tracker');
+    expect(source).toContain('href="/health/">Open tracker');
   });
   test('sign out clears the browser session cookie', async () => {
     const res = await app.request('/api/v1/auth/signout', { method: 'POST' });
