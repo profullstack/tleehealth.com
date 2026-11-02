@@ -138,7 +138,8 @@ api.post('/auth/link', async (c) => {
     // An invite (from /i/<code>, or typed) rides on the emailed link, so opening
     // it on another device still counts. Only a link that creates the account uses it.
     const invite = credits.cleanInvite(b.invite) ?? credits.cleanInvite(getCookie(c, credits.INVITE_COOKIE));
-    await sendLoginLink({ email: e, url: await auth.createLoginLink(e, { profile, invite }) });
+    const next = b.next === '/health/' ? '/health/' : null;
+    await sendLoginLink({ email: e, url: await auth.createLoginLink(e, { profile, invite, next }) });
   } catch (err) {
     console.error(`[auth] could not send link: ${err?.message ?? err}`);
   }

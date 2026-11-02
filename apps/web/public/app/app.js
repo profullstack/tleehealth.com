@@ -346,7 +346,7 @@ function renderSignin(q, signup = false) {
     const data = formData(e.target);
     try {
       const invite = q.get('invite') ?? undefined;
-      await post('/auth/link', signup ? { ...data, mode: 'signup', invite } : { email: data.email, invite });
+      await post('/auth/link', signup ? { ...data, mode: 'signup', invite, next: q.get('next') } : { email: data.email, invite, next: q.get('next') });
       e.target.innerHTML = `<div class="card"><div class="card-b"><h2>Check your email</h2><p class="muted">We sent a sign-in link to <b>${esc(data.email)}</b>. It works once and expires in 20 minutes.</p></div></div>`;
     } catch (err) {
       showFieldErrors(e.target, err.errors);
@@ -359,22 +359,24 @@ function renderSignin(q, signup = false) {
     s.src = '/assets/profile.js';
     root.append(s);
   } else {
-    document.getElementById('passkey-btn').onclick = passkeySignIn;
+    document.getElementById('passkey-btn').onclick = () => passkeySignIn(q.get('next') === '/health/' ? '/health/' : null);
     get('/auth/providers').then((providers) => {
       if (providers.coinpay) {
-        document.getElementById('signin-alternatives').innerHTML = `<div class="or">or</div><a class="btn" href="/auth/coinpay">Continue with CoinPay</a><div class="or">or</div>`;
+        const next = q.get('next') === '/health/' ? '?next=%2Fhealth%2F' : '';
+        document.getElementById('signin-alternatives').innerHTML = `<div class="or">or</div><a class="btn" href="/auth/coinpay${next}">Continue with CoinPay</a><div class="or">or</div>`;
       }
     }).catch(() => {});
   }
 }
 
-async function passkeySignIn() {
+async function passkeySignIn(next = null) {
   try {
     if (!window.SimpleWebAuthnBrowser) throw new Error('Passkeys are not available in this browser');
     const { options, challengeId } = await post('/auth/passkey/login/options');
     const response = await SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: options });
     await post('/auth/passkey/login/verify', { response, challengeId });
-    go('/app');
+    if (next === '/health/') location.assign('/health/');
+    else go('/app');
   } catch (err) {
     toast(err.name === 'NotAllowedError' ? 'Passkey sign-in was cancelled' : err.message, true);
   }
@@ -1551,7 +1553,7 @@ async function renderPortal() {
   root.innerHTML = `<div class="portal">
     ${portalHead('/portal')}
     <h1>${name ? `Hi, ${esc(name)}` : 'Your health'}</h1>
-    <section class="card"><div class="card-b row" style="justify-content:space-between"><span><b>Free health tracker</b><div class="dim small">Track readings like blood pressure, weight and glucose. Encrypted in your browser; no account required.</div></span><a class="btn primary sm" href="/health/">Open tracker</a></div></section>
+    <section class="card"><div class="card-b row" style="justify-content:space-between"><span><b>Free health tracker</b><div class="dim small">Sign in to track readings like blood pressure, weight and glucose. Encrypted in your browser.</div></span><a class="btn primary sm" href="/health/">Open tracker</a></div></section>
     <section class="card"><div class="card-b row" style="justify-content:space-between"><span><b>Records from other providers</b><div class="dim small">Bring in visits, after-visit summaries, labs, imaging and notes from MyChart and other patient portals.</div></span><a class="btn sm" href="/portal/records">Health records</a></div></section>
     ${body}</div>`;
   document.getElementById('signout').onclick = signOut;

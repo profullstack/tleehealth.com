@@ -49,6 +49,24 @@ describe.skipIf(!configured())('api', () => {
     expect((await client('').get('/me')).status).toBe(401);
   });
 
+  test('health tracker requires sign-in and the magic link returns to it', async () => {
+    const signedOut = await app.request('/health/');
+    expect(signedOut.status).toBe(302);
+    expect(signedOut.headers.get('location')).toBe('/signin?next=%2Fhealth%2F');
+
+    const email = `health${tag}@example.com`;
+    const link = new URL(await auth.createLoginLink(email, { next: '/health/' }));
+    expect(link.searchParams.get('next')).toBe('/health/');
+    const signedIn = await app.request(`${link.pathname}${link.search}`);
+    expect(signedIn.status).toBe(302);
+    expect(signedIn.headers.get('location')).toBe('/health/');
+    const cookie = signedIn.headers.get('set-cookie').split(';')[0];
+    const page = await app.request('/health/', { headers: { cookie } });
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('Sign in to record measurements');
+    expect((await app.request('/health/health.js', { headers: { cookie } })).status).toBe(200);
+  });
+
   test('CoinPay links to the signed-in account by provider subject and signs into that account', async () => {
     const userCookie = await signIn(`coinpay${tag}@example.com`);
     const before = await client(userCookie).get('/me');
@@ -92,13 +110,18 @@ describe.skipIf(!configured())('api', () => {
       expect(callback.headers.get('location')).toBe('/app/account?coinpay=linked');
       expect((await client(userCookie).get('/me')).body.coinpay_connected).toBe(true);
 
-      const loginStart = await app.request('/auth/coinpay');
+      const loginStart = await app.request('/auth/coinpay?next=%2Fhealth%2F');
       const loginAuthorize = new URL(loginStart.headers.get('location'));
       const login = await app.request(`/auth/coinpay/callback?code=another-one-time-code&state=${encodeURIComponent(loginAuthorize.searchParams.get('state'))}`);
       expect(login.status).toBe(302);
-      expect(login.headers.get('location')).toBe('/app');
+      expect(login.headers.get('location')).toBe('/health/');
       const newCookie = login.headers.get('set-cookie').split(';')[0];
       expect((await client(newCookie).get('/me')).body.user.id).toBe(before.body.user.id);
+
+      const defaultStart = await app.request('/auth/coinpay');
+      const defaultAuthorize = new URL(defaultStart.headers.get('location'));
+      const defaultLogin = await app.request(`/auth/coinpay/callback?code=default-login-code&state=${encodeURIComponent(defaultAuthorize.searchParams.get('state'))}`);
+      expect(defaultLogin.headers.get('location')).toBe('/app');
       const replay = await app.request(`/auth/coinpay/callback?code=replay&state=${encodeURIComponent(loginAuthorize.searchParams.get('state'))}`);
       expect(replay.headers.get('location')).toBe('/signin?error=coinpay-expired');
     } finally {

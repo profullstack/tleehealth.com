@@ -36,13 +36,14 @@ export const expectedOrigins = () => {
  * the token because the account row does not exist until the link is spent.
  * Bound as text and cast, so the driver never JSON-encodes the string a second time.
  */
-export async function createLoginLink(email, { profile = null, invite = null } = {}) {
+export async function createLoginLink(email, { profile = null, invite = null, next = null } = {}) {
   const token = randomBytes(32).toString('base64url');
   await db()`
     insert into login_tokens (token_hash, email, expires_at, profile, invite)
     values (${sha(token)}, ${email.trim().toLowerCase()}, ${new Date(Date.now() + TOKEN_TTL_MINUTES * 60_000)},
             ${profile ? JSON.stringify(profile) : null}::text::jsonb, ${invite})`;
-  return `${config.siteUrl}/auth/magic?t=${token}`;
+  const afterSignIn = next === '/health/' ? '&next=%2Fhealth%2F' : '';
+  return `${config.siteUrl}/auth/magic?t=${token}${afterSignIn}`;
 }
 
 /**
@@ -118,8 +119,9 @@ async function startSession(userId, userAgent) {
 }
 
 /** Start CoinPay OAuth with server-held PKCE material and one-use state. */
-export async function createCoinPayOAuthState(userId = null) {
-  const state = randomBytes(32).toString('base64url');
+export async function createCoinPayOAuthState(userId = null, next = null) {
+  const nonce = randomBytes(32).toString('base64url');
+  const state = next === '/health/' ? `${nonce}.health` : nonce;
   const verifier = randomBytes(48).toString('base64url');
   const challenge = createHash('sha256').update(verifier).digest('base64url');
   const sql = db();
@@ -137,7 +139,7 @@ export async function takeCoinPayOAuthState(state) {
     delete from coinpay_oauth_states
     where state_hash = ${sha(state)} and expires_at > now()
     returning code_verifier, user_id`;
-  return row ? { codeVerifier: row.code_verifier, userId: row.user_id ?? null } : null;
+  return row ? { codeVerifier: row.code_verifier, userId: row.user_id ?? null, next: state.endsWith('.health') ? '/health/' : null } : null;
 }
 
 /** Exchange the authorization code, then ask CoinPay's userinfo endpoint for its stable subject. */

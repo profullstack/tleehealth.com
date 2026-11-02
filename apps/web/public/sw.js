@@ -1,6 +1,6 @@
 // Minimal service worker: makes the app installable and keeps the shell offline.
 // Bump VERSION on every shell change or returning visitors keep the old page.
-const VERSION = 'tleehealth-v9';
+const VERSION = 'tleehealth-v10';
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(['/', '/app', '/assets/app.js', '/assets/app.css', '/assets/vault-crypto.js', '/icon.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest'])));
   self.skipWaiting();

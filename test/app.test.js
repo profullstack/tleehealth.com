@@ -52,35 +52,22 @@ describe('web', () => {
     expect(foot.match(/&copy;/g)?.length).toBe(1);
   });
   test('healthz', async () => expect((await get('/healthz')).status).toBe(200));
-  test('health tracker is served offline-first and owns the /health/ service-worker scope', async () => {
-    const redirect = await get('/health');
-    expect(redirect.status).toBe(301);
-    expect(redirect.headers.get('location')).toBe('/health/');
-    const page = await get('/health/');
-    expect(page.status).toBe(200);
-    const html = await page.text();
-    expect(html).toContain('Encrypted on this device before saving');
-    expect(html).toContain('href="/portal">My health portal');
-    expect((await get('/health/health.css')).status).toBe(200);
-    const script = await get('/health/health.js');
-    expect(script.status).toBe(200);
-    const source = await script.text();
-    expect(source).toContain("from '/assets/vault-crypto.js'");
-    expect(source).toContain('vaultCrypto.encryptObject');
-    expect(source).toContain('vaultCrypto.decryptObject');
-    expect((await get('/health/manifest.webmanifest')).status).toBe(200);
-    const worker = await get('/health/sw.js');
-    expect(worker.status).toBe(200);
-    expect(worker.headers.get('service-worker-allowed')).toBe('/health/');
-    const workerSource = await worker.text();
-    expect(workerSource).toContain("tleehealth-health-v3");
-    expect(workerSource).toContain('/assets/vault-crypto.js');
+  test('health tracker requires a session for its shell and assets', async () => {
+    for (const path of ['/health', '/health/']) {
+      const page = await get(path);
+      expect(page.status).toBe(302);
+      expect(page.headers.get('location')).toBe('/signin?next=%2Fhealth%2F');
+    }
+    for (const path of ['/health/health.css', '/health/health.js', '/health/manifest.webmanifest', '/health/sw.js']) {
+      expect((await get(path)).status).toBe(401);
+    }
   });
   test('patient portal links to the free local health tracker', async () => {
     const source = await (await get('/assets/app.js')).text();
     expect(source).toContain("link('/health/', 'Free tracker')");
     expect(source).toContain('Free health tracker');
     expect(source).toContain('href="/health/">Open tracker');
+    expect(source).toContain('Sign in to track readings');
   });
   test('sign out clears the browser session cookie', async () => {
     const res = await app.request('/api/v1/auth/signout', { method: 'POST' });
@@ -105,7 +92,9 @@ describe('web', () => {
   });
   test('pwa + installer are served', async () => {
     expect((await get('/manifest.webmanifest')).status).toBe(200);
-    expect((await get('/sw.js')).status).toBe(200);
+    const worker = await get('/sw.js');
+    expect(worker.status).toBe(200);
+    expect(await worker.text()).toContain('tleehealth-v10');
     expect(await (await get('/install.sh')).text()).toContain('@profullstack/tleehealth');
   });
 });
