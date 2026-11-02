@@ -395,7 +395,7 @@ function renderNewPractice() {
       <button class="primary" type="submit">Create practice</button>
       <p class="err"></p>
     </form>
-    ${first ? `<p class="dim small">Signed in as ${esc(state.me.user.email)}. A patient? Your practice adds you by email, and your records appear here. Or <a href="/portal/records">import your records from MyChart</a> and other portals. <button class="link" id="so">Sign out</button></p>` : '<a class="btn" href="/app">Cancel</a>'}
+    ${first ? `<p class="dim small">Signed in as ${esc(state.me.user.email)}. Connect CoinPay from <a href="/app/account">Account</a>. A patient? Your practice adds you by email, and your records appear here. Or <a href="/portal/records">import your records from MyChart</a> and other portals. <button class="link" id="so">Sign out</button></p>` : '<a class="btn" href="/app">Cancel</a>'}
   </div></div>`;
   const f = document.getElementById('np');
   f.onsubmit = async (e) => {
