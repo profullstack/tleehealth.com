@@ -58,10 +58,11 @@ describe.skipIf(!configured())('calls', () => {
     const raw = JSON.stringify({ data: { record_type: 'event', event_type, id: crypto.randomUUID(), payload } });
     const ts = String(Math.floor(Date.now() / 1000));
     const sig = sign(null, Buffer.from(`${ts}|${raw}`), privateKey).toString('base64');
+    const forgedSig = `${sig[0] === 'A' ? 'B' : 'A'}${sig.slice(1)}`;
     return web.request('/webhooks/telnyx', {
       method: 'POST',
       body: raw,
-      headers: { 'telnyx-signature-ed25519': badSig ? sig.replace(/^./, 'A') : sig, 'telnyx-timestamp': ts },
+      headers: { 'telnyx-signature-ed25519': badSig ? forgedSig : sig, 'telnyx-timestamp': ts },
     });
   }
   const cs = (callId) => Buffer.from(JSON.stringify({ call_id: callId })).toString('base64');
