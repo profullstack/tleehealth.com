@@ -117,6 +117,96 @@ async function startSession(userId, userAgent) {
   return id;
 }
 
+/** Start CoinPay OAuth with server-held PKCE material and one-use state. */
+export async function createCoinPayOAuthState(userId = null) {
+  const state = randomBytes(32).toString('base64url');
+  const verifier = randomBytes(48).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const sql = db();
+  await sql`delete from coinpay_oauth_states where expires_at <= now()`;
+  await sql`
+    insert into coinpay_oauth_states (state_hash, code_verifier, user_id, expires_at)
+    values (${sha(state)}, ${verifier}, ${userId}, ${new Date(Date.now() + 10 * 60_000)})`;
+  return { state, challenge };
+}
+
+/** Consume the state before any token exchange so callbacks cannot be replayed. */
+export async function takeCoinPayOAuthState(state) {
+  if (!state || state.length > 200) return null;
+  const [row] = await db()`
+    delete from coinpay_oauth_states
+    where state_hash = ${sha(state)} and expires_at > now()
+    returning code_verifier, user_id`;
+  return row ? { codeVerifier: row.code_verifier, userId: row.user_id ?? null } : null;
+}
+
+/** Exchange the authorization code, then ask CoinPay's userinfo endpoint for its stable subject. */
+export async function coinPaySubjectFromCode(code, codeVerifier) {
+  if (!config.coinpayOAuth.enabled || !code || code.length > 4096) throw new Error('CoinPay sign-in unavailable');
+  const tokenResponse = await fetch(config.coinpayOAuth.tokenUrl, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      accept: 'application/json',
+    },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      client_id: config.coinpayOAuth.clientId,
+      redirect_uri: config.coinpayOAuth.redirectUri,
+      code_verifier: codeVerifier,
+    }),
+    redirect: 'error',
+    signal: AbortSignal.timeout(10_000),
+  });
+  const tokens = await tokenResponse.json().catch(() => null);
+  if (!tokenResponse.ok || typeof tokens?.access_token !== 'string' || !tokens.access_token)
+    throw new Error('CoinPay sign-in failed');
+
+  const userResponse = await fetch(config.coinpayOAuth.userInfoUrl, {
+    headers: { authorization: `Bearer ${tokens.access_token}`, accept: 'application/json' },
+    redirect: 'error',
+    signal: AbortSignal.timeout(10_000),
+  });
+  const identity = await userResponse.json().catch(() => null);
+  if (!userResponse.ok || typeof identity?.sub !== 'string' || !identity.sub || identity.sub.length > 500)
+    throw new Error('CoinPay identity could not be verified');
+  // CoinPay explicitly marks email unverified; identity matching uses sub only.
+  return identity.sub;
+}
+
+/** Link by provider subject only. The caller must already have an active session. */
+export async function linkCoinPayIdentity(userId, subject) {
+  const sql = db();
+  const [inserted] = await sql`
+    insert into coinpay_identities (subject, user_id) values (${subject}, ${userId})
+    on conflict do nothing returning user_id`;
+  if (inserted) return 'linked';
+  const [bySubject] = await sql`select user_id from coinpay_identities where subject = ${subject}`;
+  if (bySubject) return bySubject.user_id === userId ? 'linked' : 'already_used';
+  const [byUser] = await sql`select subject from coinpay_identities where user_id = ${userId}`;
+  return byUser ? 'account_has_other_identity' : 'failed';
+}
+
+export async function coinPayIdentityLinked(userId) {
+  const [row] = await db()`select exists(select 1 from coinpay_identities where user_id = ${userId}) as linked`;
+  return Boolean(row?.linked);
+}
+
+export async function unlinkCoinPayIdentity(userId) {
+  await db()`delete from coinpay_identities where user_id = ${userId}`;
+}
+
+/** Resolve a linked identity and create a regular tleehealth session. */
+export async function signInWithCoinPay(subject, userAgent) {
+  const [user] = await db()`
+    select u.* from coinpay_identities i join users u on u.id = i.user_id
+    where i.subject = ${subject}`;
+  if (!user) return null;
+  await linkPeople(user);
+  return { user, sessionId: await startSession(user.id, userAgent) };
+}
+
 export async function userFromSession(sessionId) {
   if (!sessionId) return null;
   const [u] = await db()`

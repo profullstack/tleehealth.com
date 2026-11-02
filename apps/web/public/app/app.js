@@ -195,6 +195,7 @@ async function render() {
   try {
     if (path === '/signin' || path === '/signup') return renderSignin(q, path === '/signup');
     await loadMe();
+    if (path === '/app/account') return renderAccount(q);
     if (path === '/portal/records') return renderRecords(q);
     if (path.startsWith('/portal')) return renderPortal();
     if (path === '/app/invites' && !state.orgId) {
@@ -253,6 +254,7 @@ function shell(path, main) {
       ${is(ADMIN) ? navItem('/app/billing', 'Billing', o.billing.active ? '' : '<span class="count">unpaid</span>') : ''}
       ${navItem('/app/invites', 'Invites')}
       ${navItem('/app/settings', 'Settings')}
+      ${navItem('/app/account', 'Account')}
       ${state.me.patient_of.length ? navItem('/portal', 'My health') : ''}
       ${navItem('/portal/records', 'My records')}
     </nav>
@@ -314,17 +316,28 @@ function enhanceProfile() {
 
 function renderSignin(q, signup = false) {
   const email = q.get('email') ?? '';
+  const coinpayErrors = {
+    'coinpay-unavailable': 'CoinPay sign-in is not configured yet.',
+    'coinpay-link-session': 'Sign in with your tleehealth email first, then connect CoinPay from Account.',
+    'coinpay-expired': 'That CoinPay sign-in expired. Please try again.',
+    'coinpay-denied': 'CoinPay sign-in was cancelled.',
+    'coinpay-failed': 'CoinPay sign-in could not be completed. Please try again.',
+    'coinpay-not-linked': 'This CoinPay account is not connected yet. Sign in with your tleehealth email, then connect it from Account.',
+  };
+  const signinError = q.get('error') === 'expired'
+    ? 'That link has expired or was already used. Send a new one.'
+    : coinpayErrors[q.get('error')] ?? '';
   root.innerHTML = `<div class="center"><div class="auth">
     <a class="brand" href="/" style="padding:0">${logo} tleehealth</a>
     <h1>${signup ? 'Create your account' : 'Sign in'}</h1>
-    ${q.get('error') === 'expired' ? '<p class="err">That link has expired or was already used. Send a new one.</p>' : ''}
+    ${signinError ? `<p class="err">${esc(signinError)}</p>` : ''}
     <form id="link-form" class="stack">
       <label class="f">Email<input name="email" type="email" autocomplete="email${signup ? '' : ' webauthn'}" required value="${esc(email)}"></label>
       ${signup ? profileFields() : ''}
       <button class="primary" type="submit">${signup ? 'Email me a link to finish' : 'Email me a sign-in link'}</button>
       <p class="err" id="link-err"></p>
     </form>
-    ${signup ? '' : `<div class="or">or</div>
+    ${signup ? '' : `<div id="signin-alternatives"><div class="or">or</div></div>
     <button id="passkey-btn" type="button">Sign in with a passkey</button>`}
     <p class="dim small">${signup ? 'Already have an account? <a href="/signin">Sign in</a>.' : 'No passwords. New here? <a href="/signup">Create an account</a>, or enter your email and the link creates one. Patients: use the email your practice has on file.'}</p>
   </div></div>`;
@@ -345,7 +358,14 @@ function renderSignin(q, signup = false) {
     const s = document.createElement('script');
     s.src = '/assets/profile.js';
     root.append(s);
-  } else document.getElementById('passkey-btn').onclick = passkeySignIn;
+  } else {
+    document.getElementById('passkey-btn').onclick = passkeySignIn;
+    get('/auth/providers').then((providers) => {
+      if (providers.coinpay) {
+        document.getElementById('signin-alternatives').innerHTML = `<div class="or">or</div><a class="btn" href="/auth/coinpay">Continue with CoinPay</a><div class="or">or</div>`;
+      }
+    }).catch(() => {});
+  }
 }
 
 async function passkeySignIn() {
@@ -1346,6 +1366,38 @@ async function viewInvites(q) {
 
 /* -------------------------------------------------------------- settings -- */
 
+function renderAccount(q) {
+  const outcomes = {
+    linked: 'CoinPay is connected. You can now use it to sign in to tleehealth.',
+    disconnected: 'CoinPay was disconnected.',
+    denied: 'CoinPay connection was cancelled.',
+    failed: 'CoinPay could not be connected. Please try again.',
+    'already-used': 'That CoinPay account is connected to a different tleehealth account.',
+    'already-connected': 'This tleehealth account already has a different CoinPay account connected.',
+  };
+  const connected = state.me.coinpay_connected;
+  root.innerHTML = `<div class="portal">
+    ${portalHead('/app/account')}
+    <h1>Account</h1>
+    ${outcomes[q.get('coinpay')] ? `<p class="${q.get('coinpay') === 'linked' || q.get('coinpay') === 'disconnected' ? 'badge b-ok' : 'err'}">${esc(outcomes[q.get('coinpay')])}</p>` : ''}
+    <section class="card"><div class="card-h"><h2>Sign-in methods</h2></div><div class="card-b stack">
+      <div><b>tleehealth email</b><div class="dim small">${esc(state.me.user.email)}</div></div>
+      <div class="row" style="justify-content:space-between;gap:16px"><span><b>CoinPay</b><div class="dim small">${connected ? 'Connected. Use Sign in with CoinPay on the sign-in page.' : 'Connect your CoinPay account to use it when signing in.'}</div></span>
+        ${connected ? '<button class="danger" id="disconnect-coinpay">Disconnect</button>' : '<a class="btn primary" href="/auth/coinpay?mode=link">Connect CoinPay</a>'}</div>
+      <p class="dim small">CoinPay accounts are matched by their provider ID. The email on a CoinPay profile is not used to find or merge tleehealth accounts.</p>
+    </div></section>
+  </div>`;
+  document.getElementById('signout').onclick = signOut;
+  document.getElementById('disconnect-coinpay')?.addEventListener('click', async () => {
+    try {
+      await api('DELETE', '/me/coinpay');
+      go('/app/account?coinpay=disconnected');
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
 async function viewSettings() {
   const [{ keys }, cs, { profile }] = await Promise.all([get('/keys'), get(`/orgs/${state.orgId}/call-settings`), get('/me/profile')]);
   const s = cs.settings;
@@ -1517,7 +1569,7 @@ async function renderPortal() {
 function portalHead(path) {
   const link = (href, label) => `<a class="btn sm ${path === href ? 'primary' : ''}" href="${href}">${label}</a>`;
   return `<div class="head"><a class="brand" href="/portal" style="padding:0">${logo} tleehealth</a><div class="row">
-    ${link('/portal', 'Visits')}${link('/portal/records', 'Health records')}
+    ${link('/portal', 'Visits')}${link('/portal/records', 'Health records')}${link('/app/account', 'Account')}
     ${state.me.orgs.length ? '<a class="btn sm" href="/app">Practice</a>' : ''}<button class="sm" id="signout">Sign out</button></div></div>`;
 }
 

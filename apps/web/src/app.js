@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { ping } from '@tleehealth/db';
 import { COLUMNS as PROFILE_COLUMNS, PROFILE_ENHANCE_SCRIPT, renderProfileFields } from '@profullstack/profile';
 import { Hono } from 'hono';
+import { getCookie } from 'hono/cookie';
 import { x402Gateway } from '@profullstack/x402-gateway/hono';
 import { createCrawlGate } from './crawl-gate.js';
 import { api, coinpayWebhook, saveSignup } from './api.js';
@@ -83,6 +84,7 @@ const shell = async (c) =>
     ),
   );
 for (const p of ['/app', '/app/*', '/signin', '/signup', '/portal', '/portal/*']) app.get(p, shell);
+app.get('/app/account', shell);
 app.get('/patient', (c) => c.redirect('/portal', 301));
 const asset = (name, type) => (c) =>
   c.body(pub(`app/${name}`), 200, { 'content-type': type, 'cache-control': 'no-cache' });
@@ -111,6 +113,62 @@ app.get('/assets/webauthn.js', (c) =>
     ? c.body(WEBAUTHN_JS, 200, { 'content-type': 'text/javascript', 'cache-control': 'public, max-age=86400' })
     : c.text('missing', 404),
 );
+
+// CoinPay OAuth is a sign-in method only after its immutable provider subject
+// has been linked from an already-authenticated tleehealth account.
+app.get('/auth/coinpay', async (c) => {
+  if (!config.coinpayOAuth.enabled) return c.redirect('/signin?error=coinpay-unavailable', 302);
+  let userId = null;
+  if (c.req.query('mode') === 'link') {
+    const user = await auth.userFromSession(getCookie(c, config.session.cookie));
+    if (!user) return c.redirect('/signin?error=coinpay-link-session', 302);
+    userId = user.id;
+  }
+  const { state, challenge } = await auth.createCoinPayOAuthState(userId);
+  const authorize = new URL(config.coinpayOAuth.authorizeUrl);
+  authorize.search = new URLSearchParams({
+    response_type: 'code',
+    client_id: config.coinpayOAuth.clientId,
+    redirect_uri: config.coinpayOAuth.redirectUri,
+    scope: 'openid',
+    state,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+  }).toString();
+  return c.redirect(authorize.toString(), 302);
+});
+
+app.get('/auth/coinpay/callback', async (c) => {
+  const query = c.req.query();
+  const pending = await auth.takeCoinPayOAuthState(query.state);
+  if (!pending) return c.redirect('/signin?error=coinpay-expired', 302);
+  if (query.error) return c.redirect(pending.userId ? '/app/account?coinpay=denied' : '/signin?error=coinpay-denied', 302);
+  if (!query.code) return c.redirect(pending.userId ? '/app/account?coinpay=failed' : '/signin?error=coinpay-failed', 302);
+
+  if (pending.userId) {
+    const sessionUser = await auth.userFromSession(getCookie(c, config.session.cookie));
+    if (!sessionUser || sessionUser.id !== pending.userId)
+      return c.redirect('/signin?error=coinpay-link-session', 302);
+  }
+
+  let subject;
+  try {
+    subject = await auth.coinPaySubjectFromCode(query.code, pending.codeVerifier);
+  } catch {
+    return c.redirect(pending.userId ? '/app/account?coinpay=failed' : '/signin?error=coinpay-failed', 302);
+  }
+
+  if (pending.userId) {
+    const linked = await auth.linkCoinPayIdentity(pending.userId, subject);
+    const result = linked === 'linked' ? 'linked' : linked === 'already_used' ? 'already-used' : 'already-connected';
+    return c.redirect(`/app/account?coinpay=${result}`, 302);
+  }
+
+  const session = await auth.signInWithCoinPay(subject, c.req.header('user-agent'));
+  if (!session) return c.redirect('/signin?error=coinpay-not-linked', 302);
+  c.header('set-cookie', auth.sessionCookie(session.sessionId));
+  return c.redirect('/app', 302);
+});
 
 // The emailed sign-in link lands here, sets the session and goes to the app.
 app.get('/auth/magic', async (c) => {

@@ -49,6 +49,67 @@ describe.skipIf(!configured())('api', () => {
     expect((await client('').get('/me')).status).toBe(401);
   });
 
+  test('CoinPay links to the signed-in account by provider subject and signs into that account', async () => {
+    const userCookie = await signIn(`coinpay${tag}@example.com`);
+    const before = await client(userCookie).get('/me');
+    const keys = ['COINPAY_OAUTH_CLIENT_ID', 'COINPAY_API_URL', 'SITE_URL'];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const previousFetch = globalThis.fetch;
+    process.env.COINPAY_OAUTH_CLIENT_ID = 'cpc_test_client';
+    process.env.COINPAY_API_URL = 'https://coinpay.test';
+    process.env.SITE_URL = 'https://tleehealth.test';
+    globalThis.fetch = async (url, init = {}) => {
+      if (String(url) === 'https://coinpay.test/api/oauth/token') {
+        const form = new URLSearchParams(init.body);
+        expect(form.get('client_id')).toBe('cpc_test_client');
+        expect(form.get('redirect_uri')).toBe('https://tleehealth.test/auth/coinpay/callback');
+        expect(form.get('code_verifier')).toBeTruthy();
+        expect(form.has('client_secret')).toBe(false);
+        return Response.json({ access_token: `opaque-${form.get('code')}` });
+      }
+      if (String(url) === 'https://coinpay.test/api/oauth/userinfo') {
+        const code = String(init.headers.authorization).replace('Bearer opaque-', '');
+        const subject = code === 'unlinked-code' ? 'unlinked-subject' : 'coinpay-subject-test';
+        return Response.json({ sub: subject, email: before.body.user.email, email_verified: false });
+      }
+      throw new Error('unexpected CoinPay endpoint');
+    };
+    try {
+      const unlinkedStart = await app.request('/auth/coinpay');
+      const unlinkedAuthorize = new URL(unlinkedStart.headers.get('location'));
+      const unlinked = await app.request(`/auth/coinpay/callback?code=unlinked-code&state=${encodeURIComponent(unlinkedAuthorize.searchParams.get('state'))}`);
+      expect(unlinked.headers.get('location')).toBe('/signin?error=coinpay-not-linked');
+      expect(unlinked.headers.get('set-cookie')).toBeNull();
+
+      const start = await app.request('/auth/coinpay?mode=link', { headers: { cookie: userCookie } });
+      expect(start.status).toBe(302);
+      const authorize = new URL(start.headers.get('location'));
+      expect(authorize.pathname).toBe('/api/oauth/authorize');
+      expect(authorize.searchParams.get('code_challenge_method')).toBe('S256');
+      expect(authorize.searchParams.get('scope')).toBe('openid');
+      expect(authorize.searchParams.get('redirect_uri')).toBe('https://tleehealth.test/auth/coinpay/callback');
+      const callback = await app.request(`/auth/coinpay/callback?code=one-time-code&state=${encodeURIComponent(authorize.searchParams.get('state'))}`, { headers: { cookie: userCookie } });
+      expect(callback.headers.get('location')).toBe('/app/account?coinpay=linked');
+      expect((await client(userCookie).get('/me')).body.coinpay_connected).toBe(true);
+
+      const loginStart = await app.request('/auth/coinpay');
+      const loginAuthorize = new URL(loginStart.headers.get('location'));
+      const login = await app.request(`/auth/coinpay/callback?code=another-one-time-code&state=${encodeURIComponent(loginAuthorize.searchParams.get('state'))}`);
+      expect(login.status).toBe(302);
+      expect(login.headers.get('location')).toBe('/app');
+      const newCookie = login.headers.get('set-cookie').split(';')[0];
+      expect((await client(newCookie).get('/me')).body.user.id).toBe(before.body.user.id);
+      const replay = await app.request(`/auth/coinpay/callback?code=replay&state=${encodeURIComponent(loginAuthorize.searchParams.get('state'))}`);
+      expect(replay.headers.get('location')).toBe('/signin?error=coinpay-expired');
+    } finally {
+      globalThis.fetch = previousFetch;
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
+
   test('sign out clears the cookie and revokes the server session', async () => {
     const session = await signIn(`logout${tag}@example.com`);
     expect((await client(session).get('/me')).status).toBe(200);

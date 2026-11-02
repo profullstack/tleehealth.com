@@ -45,6 +45,26 @@ export const config = {
       return env('COINPAY_DEFAULT_CHAIN', 'USDC_POL');
     },
   },
+  coinpayOAuth: {
+    get enabled() {
+      return Boolean(process.env.COINPAY_OAUTH_CLIENT_ID);
+    },
+    get clientId() {
+      return env('COINPAY_OAUTH_CLIENT_ID');
+    },
+    get redirectUri() {
+      return env('COINPAY_OAUTH_REDIRECT_URI', `${config.siteUrl}/auth/coinpay/callback`);
+    },
+    get authorizeUrl() {
+      return `${config.coinpay.baseUrl}/api/oauth/authorize`;
+    },
+    get tokenUrl() {
+      return `${config.coinpay.baseUrl}/api/oauth/token`;
+    },
+    get userInfoUrl() {
+      return `${config.coinpay.baseUrl}/api/oauth/userinfo`;
+    },
+  },
 };
 
 /** Seat pricing: $10 per team seat, capped at $199 for up to 1,000 seats. */

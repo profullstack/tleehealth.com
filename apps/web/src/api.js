@@ -118,6 +118,8 @@ async function personIn(orgId, id, types, what = 'person') {
 
 /* ----------------------------------------------------------------- sign-in -- */
 
+api.get('/auth/providers', (c) => c.json({ coinpay: config.coinpayOAuth.enabled }));
+
 api.post('/auth/link', async (c) => {
   const b = await body(c);
   const e = str(b.email, 254)?.toLowerCase();
@@ -221,9 +223,11 @@ api.get('/me', async (c) => {
     where p.user_id = ${user.id} and p.status = 'active'
     order by o.name`;
   const [{ n }] = await db()`select count(*)::int as n from passkeys where user_id = ${user.id}`;
+  const coinpayConnected = await auth.coinPayIdentityLinked(user.id);
   return c.json({
     user: { id: user.id, email: user.email, name: user.name },
     passkeys: n,
+    coinpay_connected: coinpayConnected,
     orgs: memberships.filter((m) => TEAM.includes(m.user_type)),
     patient_of: memberships.filter((m) => m.user_type === 'patient'),
   });
@@ -233,6 +237,12 @@ api.patch('/me', async (c) => {
   const user = await requireUser(c);
   const { name } = await body(c);
   await db()`update users set name = ${str(name, 120)} where id = ${user.id}`;
+  return c.json({ ok: true });
+});
+
+api.delete('/me/coinpay', async (c) => {
+  const user = await requireUser(c);
+  await auth.unlinkCoinPayIdentity(user.id);
   return c.json({ ok: true });
 });
 
