@@ -152,6 +152,16 @@ app.get('/auth/coinpay', async (c) => {
   return c.redirect(authorize.toString(), 302);
 });
 
+/** Profullstack Pass: practices this user owns are paid until it expires. Never blocks sign-in. */
+async function grantPass(userId, pass) {
+  if (!pass?.active) return;
+  try {
+    await credits.applyPass(userId, pass);
+  } catch (err) {
+    console.error(`[coinpay] pass apply failed: ${err?.message ?? err}`);
+  }
+}
+
 app.get('/auth/coinpay/callback', async (c) => {
   const query = c.req.query();
   const pending = await auth.takeCoinPayOAuthState(query.state);
@@ -167,20 +177,23 @@ app.get('/auth/coinpay/callback', async (c) => {
   }
 
   let subject;
+  let pass;
   try {
-    subject = await auth.coinPaySubjectFromCode(query.code, pending.codeVerifier);
+    ({ subject, pass } = await auth.coinPayIdentityFromCode(query.code, pending.codeVerifier));
   } catch {
     return c.redirect(pending.userId ? '/app/account?coinpay=failed' : signInError('coinpay-failed'), 302);
   }
 
   if (pending.userId) {
     const linked = await auth.linkCoinPayIdentity(pending.userId, subject);
+    if (linked === 'linked') await grantPass(pending.userId, pass);
     const result = linked === 'linked' ? 'linked' : linked === 'already_used' ? 'already-used' : 'already-connected';
     return c.redirect(`/app/account?coinpay=${result}`, 302);
   }
 
   const session = await auth.signInWithCoinPay(subject, c.req.header('user-agent'));
   if (!session) return c.redirect(signInError('coinpay-not-linked'), 302);
+  await grantPass(session.user.id, pass);
   c.header('set-cookie', auth.sessionCookie(session.sessionId));
   return c.redirect(pending.next ?? '/app', 302);
 });

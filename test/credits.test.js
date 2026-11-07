@@ -128,6 +128,33 @@ describe.skipIf(!configured())('credit codes + invites', () => {
     expect(row.invite).toBe('INV-ZZZZ-ZZZZ-ZZZZ');
   });
 
+  test('Profullstack Pass: an owned practice is paid until the pass expires, idempotently', async () => {
+    const [u] = await db()`select id from users where email = ${`credowner${tag}@example.com`}`;
+    const [before] = await db()`select paid_through from org_billing where org_id = ${orgId}`;
+    const exp = new Date(Math.max(Date.now(), new Date(before?.paid_through ?? 0).getTime()) + 40 * 86400_000);
+    const pass = auth.passFromUserinfo({ sub: 's', pass: { active: true, expires_at: exp.toISOString() } });
+    expect(pass.active).toBe(true);
+    expect((await credits.applyPass(u.id, pass)).length).toBe(1);
+    await credits.applyPass(u.id, pass);
+    const [after] = await db()`select paid_through from org_billing where org_id = ${orgId}`;
+    expect(new Date(after.paid_through).toISOString()).toBe(exp.toISOString());
+    // An earlier pass never shortens paid time.
+    const shorter = { active: true, expiresAt: new Date(Date.now() + 86400_000) };
+    await credits.applyPass(u.id, shorter);
+    const [still] = await db()`select paid_through from org_billing where org_id = ${orgId}`;
+    expect(new Date(still.paid_through).toISOString()).toBe(exp.toISOString());
+    expect(await credits.applyPass(u.id, { active: false, expiresAt: null })).toEqual([]);
+  });
+
+  test('passFromUserinfo: active only with active === true and a future expiry', () => {
+    const f = new Date(Date.now() + 86400_000).toISOString();
+    expect(auth.passFromUserinfo({ pass: { active: true, expires_at: f } }).active).toBe(true);
+    expect(auth.passFromUserinfo({ pass: { active: true } }).active).toBe(false);
+    expect(auth.passFromUserinfo({ pass: { active: 'true', expires_at: f } }).active).toBe(false);
+    expect(auth.passFromUserinfo({ pass: { active: true, expires_at: new Date(Date.now() - 5).toISOString() } }).active).toBe(false);
+    expect(auth.passFromUserinfo({}).active).toBe(false);
+  });
+
   test('mailboxKey folds +tags and Gmail dots', () => {
     expect(credits.mailboxKey('J.Doe+x@GoogleMail.com')).toBe('jdoe@gmail.com');
   });

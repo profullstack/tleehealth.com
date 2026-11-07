@@ -142,8 +142,26 @@ export async function takeCoinPayOAuthState(state) {
   return row ? { codeVerifier: row.code_verifier, userId: row.user_id ?? null, next: state.endsWith('.health') ? '/health/' : null } : null;
 }
 
+/**
+ * Profullstack Pass (https://coinpayportal.com/pass) from a CoinPay userinfo
+ * body: `pass: { active, expires_at }`. Active only when `active === true` AND
+ * `expires_at` parses to a date still in the future; anything else is no pass.
+ */
+export function passFromUserinfo(identity, now = new Date()) {
+  const pass = identity && typeof identity === 'object' ? identity.pass : null;
+  if (!pass || typeof pass !== 'object') return { active: false, expiresAt: null };
+  const d = typeof pass.expires_at === 'string' && pass.expires_at.trim() ? new Date(pass.expires_at) : null;
+  const expiresAt = d && Number.isFinite(d.getTime()) ? d : null;
+  return { active: pass.active === true && expiresAt !== null && expiresAt.getTime() > now.getTime(), expiresAt };
+}
+
 /** Exchange the authorization code, then ask CoinPay's userinfo endpoint for its stable subject. */
 export async function coinPaySubjectFromCode(code, codeVerifier) {
+  return (await coinPayIdentityFromCode(code, codeVerifier)).subject;
+}
+
+/** The same exchange, returning the subject and the Profullstack Pass claim. */
+export async function coinPayIdentityFromCode(code, codeVerifier) {
   if (!config.coinpayOAuth.enabled || !code || code.length > 4096) throw new Error('CoinPay sign-in unavailable');
   const tokenResponse = await fetch(config.coinpayOAuth.tokenUrl, {
     method: 'POST',
@@ -174,7 +192,7 @@ export async function coinPaySubjectFromCode(code, codeVerifier) {
   if (!userResponse.ok || typeof identity?.sub !== 'string' || !identity.sub || identity.sub.length > 500)
     throw new Error('CoinPay identity could not be verified');
   // CoinPay explicitly marks email unverified; identity matching uses sub only.
-  return identity.sub;
+  return { subject: identity.sub, pass: passFromUserinfo(identity) };
 }
 
 /** Link by provider subject only. The caller must already have an active session. */
