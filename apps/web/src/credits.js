@@ -72,6 +72,33 @@ export async function applyDays(userId, orgId, days) {
   }
 }
 
+/* --------------------------------------------------------- Profullstack Pass -- */
+
+/**
+ * A CoinPay user who deposited $99 into their own CoinPay wallet holds a
+ * Profullstack Pass: a free month on every Profullstack property. CoinPay sends
+ * it at sign-in only. Here what is paid for is a practice, so an active pass
+ * makes every practice the user OWNS paid until the pass expires:
+ * org_billing.paid_through = max(stored, pass expiry). Re-applying the same pass
+ * changes nothing (greatest), so it is idempotent; a payment during the pass
+ * extends from the later end, so paid time is never eaten. Bound to the CoinPay
+ * subject by the caller, never to an email. Returns the practices it touched.
+ */
+export async function applyPass(userId, pass) {
+  const exp = pass?.expiresAt instanceof Date ? pass.expiresAt : null;
+  if (!userId || pass?.active !== true || !exp || exp.getTime() <= Date.now()) return [];
+  const rows = await db()`
+    insert into org_billing (org_id, paid_through)
+    select p.org_id, ${exp}::timestamptz from org_people p
+    where p.user_id = ${userId} and p.user_type = 'owner' and p.status = 'active'
+    on conflict (org_id) do update set paid_through =
+      greatest(coalesce(org_billing.paid_through, excluded.paid_through), excluded.paid_through)
+    returning org_id, paid_through`;
+  for (const r of rows)
+    await db()`insert into audit_log (org_id, user_id, action, subject) values (${r.org_id}, ${userId}, 'billing.coinpay_pass', ${exp.toISOString()})`;
+  return rows;
+}
+
 /* ----------------------------------------------------------------- invites -- */
 
 let disposable = null;
