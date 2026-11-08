@@ -302,14 +302,14 @@ async function establishVault(auth, userId, { recover = false } = {}) {
   if (recover) {
     if (!status.configured) throw new Error('No encrypted vault exists to recover.');
     const enteredRecoveryKey = await promptSecret('Recovery key');
-    const passphrase = await promptSecret('New vault passphrase (at least 16 characters)');
+    const passphrase = await promptSecret('New vault passphrase');
     const confirm = await promptSecret('Repeat new passphrase');
     if (passphrase !== confirm) throw new Error('Passphrases do not match.');
     handle = await unlockWithRecoveryKey(userId, enteredRecoveryKey, status.envelope);
     ({ envelope, recoveryKey } = await rewrapVaultKey(userId, handle, passphrase));
   } else {
     if (status.configured) throw new Error('A vault already exists. Use `tleehealth vault recover` to rotate its passphrase.');
-    const passphrase = await promptSecret('New vault passphrase (at least 16 characters)');
+    const passphrase = await promptSecret('New vault passphrase');
     const confirm = await promptSecret('Repeat passphrase');
     if (passphrase !== confirm) throw new Error('Passphrases do not match.');
     const created = await createVault(userId, passphrase);

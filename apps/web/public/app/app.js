@@ -1813,8 +1813,8 @@ function recordVaultCard(status, files, manifestError, userId) {
   if (!status.configured) {
     content = `<p class="dim small">Create a separate vault passphrase and recovery key. Your account sign-in does not unlock this vault. Files are encrypted in this browser before upload.</p>
       <form id="record-vault-setup" class="stack" style="max-width:440px">
-        <label class="f">Vault passphrase<input name="passphrase" type="password" minlength="16" maxlength="1024" autocomplete="new-password" required></label>
-        <label class="f">Repeat passphrase<input name="confirm" type="password" minlength="16" maxlength="1024" autocomplete="new-password" required></label>
+        <label class="f">Vault passphrase<input name="passphrase" type="password" maxlength="1024" autocomplete="new-password" required></label>
+        <label class="f">Repeat passphrase<input name="confirm" type="password" maxlength="1024" autocomplete="new-password" required></label>
         <p class="err" data-vault-error></p><button class="btn primary" type="submit">Create encrypted vault</button>
       </form>`;
   } else if (!unlocked) {
@@ -1892,8 +1892,8 @@ function showRecordVaultRecoveryKey({ title, recoveryKey, handle, userId, envelo
 function openRecordVaultRecovery(status, userId) {
   modal.innerHTML = `<div class="m-h"><h2>Recover encrypted vault</h2><button type="button" class="sm" data-close aria-label="Close">Close</button></div><div class="m-b">
     <form id="record-vault-recovery-form" class="stack"><label class="f">Recovery key<textarea name="recoveryKey" rows="3" autocomplete="off" required></textarea></label>
-      <label class="f">New vault passphrase<input name="passphrase" type="password" minlength="16" maxlength="1024" autocomplete="new-password" required></label>
-      <label class="f">Repeat new passphrase<input name="confirm" type="password" minlength="16" maxlength="1024" autocomplete="new-password" required></label>
+      <label class="f">New vault passphrase<input name="passphrase" type="password" maxlength="1024" autocomplete="new-password" required></label>
+      <label class="f">Repeat new passphrase<input name="confirm" type="password" maxlength="1024" autocomplete="new-password" required></label>
       <p class="err" data-vault-error></p><button class="btn primary" type="submit">Recover and rotate keys</button></form>
   </div>`;
   modal.showModal();

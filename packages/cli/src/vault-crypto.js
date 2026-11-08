@@ -46,9 +46,9 @@ function assertUserId(userId) {
   }
 }
 
-function assertPassphrase(passphrase, minLength = 16) {
+function assertPassphrase(passphrase, minLength = 1) {
   if (typeof passphrase !== 'string' || passphrase.normalize('NFC').length < minLength) {
-    throw new Error(`Use a passphrase with at least ${minLength} characters.`);
+    throw new Error(minLength > 1 ? `Use a passphrase with at least ${minLength} characters.` : 'Enter a passphrase.');
   }
   if (passphrase.length > 1024) throw new Error('Passphrase is too long.');
 }
@@ -64,7 +64,7 @@ function aadForObject(userId, objectId) {
   return encoder.encode(`tleehealth:record-vault:object:v${FORMAT_VERSION}:${userId}:${objectId}`);
 }
 
-async function derivePassphraseKey(passphrase, salt, minLength = 16) {
+async function derivePassphraseKey(passphrase, salt, minLength = 1) {
   assertPassphrase(passphrase, minLength);
   const crypto = webcrypto();
   const passphraseBytes = encoder.encode(passphrase.normalize('NFC'));
@@ -133,7 +133,7 @@ export function lockVault(handle) {
   handles.delete(handle);
 }
 
-export async function createVault(userId, passphrase, { minLength = 16 } = {}) {
+export async function createVault(userId, passphrase, { minLength = 1 } = {}) {
   assertUserId(userId);
   assertPassphrase(passphrase, minLength);
   const rawKey = randomBytes(32);
@@ -182,7 +182,7 @@ export function validateVaultEnvelope(envelope) {
   return envelope;
 }
 
-export async function unlockWithPassphrase(userId, passphrase, untrustedEnvelope, { minLength = 16 } = {}) {
+export async function unlockWithPassphrase(userId, passphrase, untrustedEnvelope, { minLength = 1 } = {}) {
   const envelope = validateVaultEnvelope(untrustedEnvelope);
   let rawKey;
   try {
