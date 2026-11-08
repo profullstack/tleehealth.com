@@ -47,8 +47,8 @@ describe('web', () => {
     const foot = home.match(/<footer\b[^>]*data-pfs-footer[^>]*>[\s\S]*?<\/footer>/)?.[0] ?? '';
     expect(foot).not.toBe('');
     expect(foot).toContain('class="webring pfs-footer__ring"');
-    expect(foot).toContain('https://rssamplifier.com/ring/profullstack/next?from=https%3A%2F%2Ftleehealth.com%2F');
-    expect(foot).toContain('https://rssamplifier.com/ring/profullstack/previous?from=https%3A%2F%2Ftleehealth.com%2F');
+    expect(foot).toContain('https://rssamplifier.com/ring/profullstack/next?from=https%3A%2F%2Ftleehealth.pwa.pit.world%2F');
+    expect(foot).toContain('https://rssamplifier.com/ring/profullstack/previous?from=https%3A%2F%2Ftleehealth.pwa.pit.world%2F');
     expect(foot.match(/&copy;/g)?.length).toBe(1);
   });
   test('healthz', async () => expect((await get('/healthz')).status).toBe(200));

@@ -52,7 +52,7 @@ jobs:
       - name: Verify the site answers
         run: |
           for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "https://tleehealth.com/api/v1/health" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://tleehealth.pwa.pit.world/api/v1/health" || true)
             case "$code" in 2*) echo "tleehealth.com $code"; exit 0;; esac
             echo "attempt $i: $code"; sleep 10
           done

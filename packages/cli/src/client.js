@@ -31,7 +31,7 @@ export async function saveConfig(patch) {
 export async function resolveAuth({ server, key } = {}) {
   const saved = await loadConfig();
   return {
-    server: (server || process.env.TLEEHEALTH_URL || saved.server || 'https://tleehealth.com').replace(/\/+$/, ''),
+    server: (server || process.env.TLEEHEALTH_URL || saved.server || 'https://tleehealth.pwa.pit.world').replace(/\/+$/, ''),
     key: key || process.env.TLEEHEALTH_API_KEY || saved.key || '',
   };
 }

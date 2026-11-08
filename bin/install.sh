@@ -1,5 +1,5 @@
 #!/bin/sh
-# tleehealth installer: curl -fsSL https://tleehealth.com/install.sh | sh
+# tleehealth installer: curl -fsSL https://tleehealth.pwa.pit.world/install.sh | sh
 # Installs the tleehealth CLI + TUI (@profullstack/tleehealth) with bun or npm,
 # pinned to the registry's exact latest version (a bare @latest can be served
 # from a package manager's cache).

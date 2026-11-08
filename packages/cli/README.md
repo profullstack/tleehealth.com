@@ -1,9 +1,9 @@
 # @profullstack/tleehealth
 
-The [tleehealth](https://tleehealth.com) CLI and dashboard TUI.
+The [tleehealth](https://tleehealth.pwa.pit.world) CLI and dashboard TUI.
 
 ```sh
-npm i -g @profullstack/tleehealth     # or: curl -fsSL https://tleehealth.com/install.sh | sh
+npm i -g @profullstack/tleehealth     # or: curl -fsSL https://tleehealth.pwa.pit.world/install.sh | sh
 tleehealth schedule --date today
 tleehealth dashboard                  # Today · Needs · Caseload · Records (alias: tleehealth tui)
 ```
