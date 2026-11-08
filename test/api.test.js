@@ -150,6 +150,19 @@ describe.skipIf(!configured())('api', () => {
     expect(res.headers.get('location')).toBe('/signin?error=expired');
   });
 
+  test('an account saves its measurement units without touching its name', async () => {
+    await owner.patch('/me', { name: 'Unit Tester' });
+    expect((await owner.get('/me')).body.user.units).toBeNull();
+    expect((await owner.patch('/me', { units: 'imperial' })).status).toBe(200);
+    let me = (await owner.get('/me')).body.user;
+    expect(me.units).toBe('imperial');
+    expect(me.name).toBe('Unit Tester');
+    expect((await owner.patch('/me', { units: 'furlongs' })).status).toBe(400);
+    expect((await owner.patch('/me', { units: 'auto' })).status).toBe(200);
+    me = (await owner.get('/me')).body.user;
+    expect(me.units).toBeNull();
+  });
+
   test('owner creates a practice with a location', async () => {
     const r = await owner.post('/orgs', { name: `Lin Family Practice ${tag}`, location: 'Mission St' });
     expect(r.status).toBe(201);

@@ -103,6 +103,7 @@ const asset = (name, type) => (c) =>
   c.body(pub(`app/${name}`), 200, { 'content-type': type, 'cache-control': 'no-cache' });
 app.get('/assets/app.js', asset('app.js', 'text/javascript; charset=utf-8'));
 app.get('/assets/app.css', asset('app.css', 'text/css; charset=utf-8'));
+app.get('/assets/units.js', asset('units.js', 'text/javascript; charset=utf-8'));
 app.get('/assets/vault-crypto.js', (c) =>
   c.body(RECORD_VAULT_CRYPTO_JS, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
 );
