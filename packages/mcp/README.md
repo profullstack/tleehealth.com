@@ -1,6 +1,6 @@
 # @profullstack/tleehealth-mcp
 
-MCP server for [tleehealth](https://tleehealth.com).
+MCP server for [tleehealth](https://tleehealth.pwa.pit.world).
 
 ```json
 { "mcpServers": { "tleehealth": { "command": "npx", "args": ["-y", "@profullstack/tleehealth-mcp"] } } }

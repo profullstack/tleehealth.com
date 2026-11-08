@@ -1,16 +1,16 @@
 import { footerHtml, footerHtmlSync } from '@profullstack/footer';
 
 const options = {
-  site: 'https://tleehealth.com/',
-  owner: { name: 'tleehealth', url: 'https://tleehealth.com/' },
+  site: 'https://tleehealth.pwa.pit.world/',
+  owner: { name: 'tleehealth', url: 'https://tleehealth.pwa.pit.world/' },
   links: [
     { label: 'Start a practice', href: '/app' },
     { label: 'Terms', href: '/terms' },
     { label: 'Privacy', href: '/privacy' },
     { label: 'Contact', href: 'mailto:hello@tleehealth.com' },
   ],
-  pwamartHref: 'https://pwamart.com/for?site=https://tleehealth.com/',
-  builtIndieHref: 'https://built.indie.pit.world/for?site=https://tleehealth.com/',
+  pwamartHref: 'https://pwamart.com/for?site=https://tleehealth.pwa.pit.world/',
+  builtIndieHref: 'https://built.indie.pit.world/for?site=https://tleehealth.pwa.pit.world/',
 };
 const TTL_MS = 15 * 60 * 1000;
 

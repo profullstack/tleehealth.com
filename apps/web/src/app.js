@@ -293,7 +293,7 @@ app.post('/webhooks/telnyx', async (c) => {
 
 /* --------------------------------------------------------------------- API -- */
 
-app.get('/api/v1', (c) => c.json({ name: 'tleehealth', version: VERSION, docs: 'https://tleehealth.com/llms.txt' }));
+app.get('/api/v1', (c) => c.json({ name: 'tleehealth', version: VERSION, docs: 'https://tleehealth.pwa.pit.world/llms.txt' }));
 
 // Up means the app AND its database answer; 503 otherwise.
 app.get('/api/v1/health', async (c) => {
@@ -334,7 +334,7 @@ app.get('/.well-known/jwks-sandbox.json', jwksRoute);
 app.get('/.well-known/openwebring.json', (c) =>
   c.json({
     openwebring: '0.1',
-    site: { url: 'https://tleehealth.com/', name: 'tleehealth' },
+    site: { url: 'https://tleehealth.pwa.pit.world/', name: 'tleehealth' },
     made_by: 'both',
     rings: [{ ring: 'https://rssamplifier.com/ring/profullstack', slug: 'tleehealth-com' }],
   }),
@@ -353,7 +353,7 @@ app.get('/llms.txt', (c) =>
 
 Pricing: $10 per team seat per month, or $199/month for up to 1,000 seats. Patients and leads are free.
 
-## API (https://tleehealth.com/api/v1)
+## API (https://tleehealth.pwa.pit.world/api/v1)
 Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (create a key in the app under Settings).
 - GET /health
 - GET /me                                   your practices and user type in each
@@ -391,7 +391,7 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
                                             the month's billable codes per patient, ready or on hold with the reason
 
 ## Tools
-- CLI + TUI: npm i -g @profullstack/tleehealth  (or: curl -fsSL https://tleehealth.com/install.sh | sh)
+- CLI + TUI: npm i -g @profullstack/tleehealth  (or: curl -fsSL https://tleehealth.pwa.pit.world/install.sh | sh)
 - MCP: npx -y @profullstack/tleehealth-mcp
 `),
 );

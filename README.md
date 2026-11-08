@@ -38,7 +38,7 @@ up to 1,000 seats, whichever is lower. Patients and leads are free.
 | `packages/cli` | `@profullstack/tleehealth`: CLI, hqtui front-desk TUI (`tleehealth tui`), API client |
 | `packages/mcp` | `@profullstack/tleehealth-mcp`: MCP server over stdio |
 | `docs/e2ee-record-vault.md` | E2EE vault protocol, limits and legacy-data boundary |
-| `bin/install.sh` | `curl -fsSL https://tleehealth.com/install.sh \| sh` |
+| `bin/install.sh` | `curl -fsSL https://tleehealth.pwa.pit.world/install.sh \| sh` |
 
 ```sh
 bun install
@@ -56,4 +56,4 @@ bun run dev        # http://localhost:3000 (without RESEND_API_KEY the sign-in l
   `release.yml` tags that CLI version, creates the GitHub release, and publishes both
   packages to npm. The CLI package exports the shared vault crypto module.
 
-The API is listed at https://tleehealth.com/llms.txt.
+The API is listed at https://tleehealth.pwa.pit.world/llms.txt.

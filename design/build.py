@@ -14,7 +14,7 @@ PAGES = {
     'Main.dc.html': ('index.html', 'tleehealth: the practice that runs itself',
                      'Telehealth and practice management with an AI agent that calls every patient. '
                      'Scheduling, prescriptions, labs, care plans and Medicare navigation billing. $10 per seat or $199 for up to 1,000.',
-                     'https://tleehealth.com/'),
+                     'https://tleehealth.pwa.pit.world/'),
 }
 
 for src, (out, title, desc, canonical) in PAGES.items():

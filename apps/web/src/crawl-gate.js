@@ -12,7 +12,7 @@ export function createCrawlGate(env = process.env) {
   const apiKey = env.COINPAY_X402_KEY || '';
   const payTo = env.CRAWL_PAY_TO || '';
   if (!apiKey || !payTo) return null;
-  const site = env.SITE_URL && !/localhost|127\.0\.0\.1/.test(env.SITE_URL) ? env.SITE_URL : 'https://tleehealth.com';
+  const site = env.SITE_URL && !/localhost|127\.0\.0\.1/.test(env.SITE_URL) ? env.SITE_URL : 'https://tleehealth.pwa.pit.world';
   return createGateway({
     siteUrl: site.replace(/\/+$/, ''),
     siteName: 'tleehealth',

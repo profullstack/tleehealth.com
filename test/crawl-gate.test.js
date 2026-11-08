@@ -10,7 +10,7 @@ const CHROME = {
   'sec-fetch-dest': 'document',
 };
 const gate = createCrawlGate({ COINPAY_X402_KEY: 'cp_live_test', CRAWL_PAY_TO: '0xCC3b072391AE7A8d10cF00DdC5F61DB2cA5541E5' });
-const ask = (path, headers) => gate.handle(new Request(`https://tleehealth.com${path}`, { headers }));
+const ask = (path, headers) => gate.handle(new Request(`https://tleehealth.pwa.pit.world${path}`, { headers }));
 
 describe('crawl gate', () => {
   test('is off without a key', () => {
