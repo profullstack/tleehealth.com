@@ -1,10 +1,14 @@
 import * as vaultCrypto from '/assets/vault-crypto.js';
+import { UNITS, PLACEHOLDERS, displayReading, resolveUnits, detectUnits } from '/assets/units.js';
 
 const sessionResponse = await fetch('/api/v1/me', { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
 if (!sessionResponse?.ok) {
   location.replace('/signin?next=%2Fhealth%2F');
   throw new Error('Sign in required to use the health tracker.');
 }
+const me = await sessionResponse.json().catch(() => ({}));
+let savedUnits = me?.user?.units ?? null;
+let unitSystem = resolveUnits(savedUnits);
 
 const DB_NAME = 'tleehealth-health-tracker';
 const DB_VERSION = 2;
@@ -86,10 +90,12 @@ function fromBase64Url(text) {
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
+const unitFor = (k) => UNITS[k]?.[unitSystem] ?? LABELS[k].unit;
+
 function updateKind() {
   const spec = LABELS[kind.value];
-  document.getElementById('unit').textContent = spec.unit + (kind.value === 'blood-pressure' ? ' (systolic/diastolic)' : '');
-  value.placeholder = spec.placeholder;
+  document.getElementById('unit').textContent = unitFor(kind.value) + (kind.value === 'blood-pressure' ? ' (systolic/diastolic)' : '');
+  value.placeholder = PLACEHOLDERS[kind.value]?.[unitSystem] ?? spec.placeholder;
   value.inputMode = kind.value === 'blood-pressure' ? 'text' : 'decimal';
 }
 
@@ -101,6 +107,7 @@ function localDateInput() {
 function validValue(entry) {
   if (typeof entry.value !== 'string' || entry.value.length > 32 || !entry.value.trim()) return false;
   if (!LABELS[entry.kind]) return false;
+  if (entry.unit !== undefined && !Object.values(UNITS[entry.kind] ?? {}).includes(entry.unit)) return false;
   if (entry.kind === 'blood-pressure') return /^\s*\d{2,3}\s*\/\s*\d{2,3}\s*$/.test(entry.value);
   return /^\s*\d{1,3}(?:\.\d{1,2})?\s*$/.test(entry.value);
 }
@@ -134,7 +141,7 @@ async function renderEntries() {
   for (const entry of entries) {
     const row = document.createElement('tr');
     appendCell(row, LABELS[entry.kind].name, 'measure');
-    appendCell(row, `${entry.value} ${LABELS[entry.kind].unit}`, 'reading');
+    appendCell(row, displayReading(entry, unitSystem, LABELS[entry.kind].unit), 'reading');
     appendCell(row, formatDate(entry.takenAt), 'date');
     appendCell(row, entry.note, 'note');
     const action = document.createElement('td');
@@ -346,6 +353,31 @@ async function handleImport(event) {
 }
 
 kind.addEventListener('change', updateKind);
+const unitsSelect = document.getElementById('units');
+const detectedUnits = detectUnits(navigator.languages ?? [navigator.language]);
+unitsSelect.querySelector('option[value="auto"]').textContent = `Automatic (${detectedUnits})`;
+unitsSelect.value = savedUnits ?? 'auto';
+unitsSelect.addEventListener('change', async () => {
+  const choice = unitsSelect.value;
+  const previous = savedUnits;
+  savedUnits = choice === 'auto' ? null : choice;
+  unitSystem = resolveUnits(savedUnits);
+  updateKind();
+  if (vaultHandle) renderEntries().catch(() => {});
+  try {
+    const res = await fetch('/api/v1/me', {
+      method: 'PATCH',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ units: choice }),
+    });
+    if (!res.ok) throw new Error();
+    status.textContent = 'Units saved to your account.';
+  } catch {
+    savedUnits = previous;
+    status.textContent = 'Units changed here, but could not be saved to your account.';
+  }
+});
 takenAt.value = localDateInput();
 updateKind();
 form.addEventListener('submit', async (event) => {
@@ -357,6 +389,7 @@ form.addEventListener('submit', async (event) => {
     takenAt: new Date(takenAt.value).toISOString(),
     note: String(new FormData(form).get('note') ?? '').trim().slice(0, 500),
   };
+  if (UNITS[entry.kind]) entry.unit = unitFor(entry.kind);
   if (!validValue(entry)) {
     status.textContent = kind.value === 'blood-pressure' ? 'Enter blood pressure as systolic/diastolic, such as 120/80.' : 'Enter a number for this measurement.';
     value.focus();

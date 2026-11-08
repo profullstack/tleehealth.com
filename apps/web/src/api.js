@@ -226,7 +226,7 @@ api.get('/me', async (c) => {
   const [{ n }] = await db()`select count(*)::int as n from passkeys where user_id = ${user.id}`;
   const coinpayConnected = await auth.coinPayIdentityLinked(user.id);
   return c.json({
-    user: { id: user.id, email: user.email, name: user.name },
+    user: { id: user.id, email: user.email, name: user.name, units: user.units ?? null },
     passkeys: n,
     coinpay_connected: coinpayConnected,
     orgs: memberships.filter((m) => TEAM.includes(m.user_type)),
@@ -236,8 +236,16 @@ api.get('/me', async (c) => {
 
 api.patch('/me', async (c) => {
   const user = await requireUser(c);
-  const { name } = await body(c);
-  await db()`update users set name = ${str(name, 120)} where id = ${user.id}`;
+  const input = await body(c);
+  // Only the fields sent change, so saving units never clears the name.
+  if ('units' in input && input.units !== null && input.units !== 'auto' && !['imperial', 'metric'].includes(input.units)) {
+    return c.json({ error: 'units must be imperial, metric or auto' }, 400);
+  }
+  if ('name' in input) await db()`update users set name = ${str(input.name, 120)} where id = ${user.id}`;
+  if ('units' in input) {
+    const units = input.units === 'imperial' || input.units === 'metric' ? input.units : null;
+    await db()`update users set units = ${units} where id = ${user.id}`;
+  }
   return c.json({ ok: true });
 });
 

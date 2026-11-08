@@ -65,8 +65,14 @@ describe('web', () => {
     expect(worker.status).toBe(200);
     expect(worker.headers.get('service-worker-allowed')).toBe('/health/');
     const workerSource = await worker.text();
-    expect(workerSource).toContain('tleehealth-health-v4');
+    expect(workerSource).toContain('tleehealth-health-v5');
     expect(workerSource).toContain("client.navigate('/health/')");
+  });
+  test('units module is public and imported by the tracker and account page', async () => {
+    const res = await get('/assets/units.js');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('export function detectUnits');
+    expect(await (await get('/assets/app.js')).text()).toContain("from '/assets/units.js'");
   });
   test('patient portal links to the free local health tracker', async () => {
     const source = await (await get('/assets/app.js')).text();

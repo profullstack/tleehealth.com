@@ -1,4 +1,4 @@
-const CACHE = 'tleehealth-health-v4';
+const CACHE = 'tleehealth-health-v5';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());

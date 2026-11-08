@@ -1,5 +1,6 @@
 // tleehealth app. Plain ES module, no build step. Talks only to /api/v1.
 import * as recordVaultCrypto from '/assets/vault-crypto.js';
+import { detectUnits } from '/assets/units.js';
 
 const root = document.getElementById('root');
 const modal = document.getElementById('modal');
@@ -1368,6 +1369,30 @@ async function viewInvites(q) {
 
 /* -------------------------------------------------------------- settings -- */
 
+function unitsCard() {
+  const saved = state.me.user.units ?? 'auto';
+  const detected = detectUnits(navigator.languages ?? [navigator.language]);
+  const opt = (v, label) => `<option value="${v}" ${saved === v ? 'selected' : ''}>${label}</option>`;
+  return `<section class="card"><div class="card-h"><h2>Units</h2></div><div class="card-b stack">
+      <label class="f">Measurement units<select id="units-select" name="units">
+        ${opt('auto', `Automatic (${detected === 'imperial' ? 'imperial' : 'metric'} for your region)`)}
+        ${opt('imperial', 'Imperial (lb, °F)')}
+        ${opt('metric', 'Metric (kg, °C)')}
+      </select></label>
+      <p class="dim small">Used by the health tracker. Readings you already saved are converted for display.</p>
+    </div></section>`;
+}
+
+function bindUnitsCard() {
+  document.getElementById('units-select')?.addEventListener('change', (e) => {
+    const units = e.target.value;
+    act(async () => {
+      await api('PATCH', '/me', { units });
+      state.me.user.units = units === 'auto' ? null : units;
+    }, 'Units saved');
+  });
+}
+
 function renderAccount(q) {
   const outcomes = {
     linked: 'CoinPay is connected. You can now use it to sign in to tleehealth.',
@@ -1388,8 +1413,10 @@ function renderAccount(q) {
         ${connected ? '<button class="danger" id="disconnect-coinpay">Disconnect</button>' : '<a class="btn primary" href="/auth/coinpay?mode=link">Connect CoinPay</a>'}</div>
       <p class="dim small">CoinPay accounts are matched by their provider ID. The email on a CoinPay profile is not used to find or merge tleehealth accounts.</p>
     </div></section>
+    ${unitsCard()}
   </div>`;
   document.getElementById('signout').onclick = signOut;
+  bindUnitsCard();
   document.getElementById('disconnect-coinpay')?.addEventListener('click', async () => {
     try {
       await api('DELETE', '/me/coinpay');

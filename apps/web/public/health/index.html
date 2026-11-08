@@ -29,7 +29,7 @@
     <section class="card" id="vault-card"><div class="card-b" id="vault-screen" aria-live="polite"></div></section>
     <div id="tracker" hidden>
       <section class="card">
-        <div class="card-head"><div><p class="eyebrow">New reading</p><h2>Add a measurement</h2></div><button type="button" id="lock">Lock tracker</button></div>
+        <div class="card-head"><div><p class="eyebrow">New reading</p><h2>Add a measurement</h2></div><div class="actions tools"><label class="units-pick"><span class="sr-only">Units</span><select id="units" aria-label="Measurement units"><option value="auto">Automatic</option><option value="imperial">Imperial (lb, °F)</option><option value="metric">Metric (kg, °C)</option></select></label><button type="button" id="lock">Lock tracker</button></div></div>
         <form id="entry-form" class="form">
           <label>Measurement
             <select name="kind" id="kind" required>
