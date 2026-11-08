@@ -1,6 +1,6 @@
 {
   "name": "@profullstack/tleehealth-mcp",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "MCP server for tleehealth.com: read the practice schedule, the navigation caseload and superbill, and log navigation time from any MCP client.",
   "type": "module",
   "license": "MIT",
