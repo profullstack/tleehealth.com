@@ -181,7 +181,7 @@ export async function coinPayIdentityFromCode(code, codeVerifier) {
   });
   const tokens = await tokenResponse.json().catch(() => null);
   if (!tokenResponse.ok || typeof tokens?.access_token !== 'string' || !tokens.access_token)
-    throw new Error('CoinPay sign-in failed');
+    throw new Error(`CoinPay sign-in failed: ${tokenResponse.status} ${tokens?.error ?? ''} ${tokens?.error_description ?? ''}`.trim());
 
   const userResponse = await fetch(config.coinpayOAuth.userInfoUrl, {
     headers: { authorization: `Bearer ${tokens.access_token}`, accept: 'application/json' },

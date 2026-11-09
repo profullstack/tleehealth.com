@@ -181,7 +181,8 @@ app.get('/auth/coinpay/callback', async (c) => {
   let pass;
   try {
     ({ subject, pass } = await auth.coinPayIdentityFromCode(query.code, pending.codeVerifier));
-  } catch {
+  } catch (err) {
+    console.error(`[coinpay] code exchange failed: ${err?.message ?? err}`);
     return c.redirect(pending.userId ? '/app/account?coinpay=failed' : signInError('coinpay-failed'), 302);
   }
 
