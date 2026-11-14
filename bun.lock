@@ -15,7 +15,7 @@
         "@profullstack/redeem-credits": "0.2.0",
         "@profullstack/sealed-secrets": "0.1.0",
         "@profullstack/tleehealth": "workspace:*",
-        "@profullstack/x402-gateway": "^0.13.1",
+        "@profullstack/x402-gateway": "^0.18.1",
         "@simplewebauthn/browser": "^14.0.0",
         "@simplewebauthn/server": "^14.0.3",
         "@tleehealth/db": "workspace:*",
@@ -26,7 +26,7 @@
     },
     "packages/cli": {
       "name": "@profullstack/tleehealth",
-      "version": "0.5.3",
+      "version": "0.5.4",
       "bin": {
         "tleehealth": "./bin/tleehealth.mjs",
       },
@@ -44,7 +44,7 @@
     },
     "packages/mcp": {
       "name": "@profullstack/tleehealth-mcp",
-      "version": "0.5.3",
+      "version": "0.5.4",
       "bin": {
         "tleehealth-mcp": "./bin/tleehealth-mcp.mjs",
       },
@@ -116,7 +116,7 @@
 
     "@profullstack/tleehealth-mcp": ["@profullstack/tleehealth-mcp@workspace:packages/mcp"],
 
-    "@profullstack/x402-gateway": ["@profullstack/x402-gateway@0.13.1", "", { "dependencies": { "@profullstack/keys": "^0.1.0" } }, "sha512-V7liSO0tShZRlp8dancuDuUSF/rqrr5YF3bzLoZy9wn6ixf1RIRPYTepe72s36JOdSVzi3wfuhaZFm9y0RpV4w=="],
+    "@profullstack/x402-gateway": ["@profullstack/x402-gateway@0.18.1", "", { "dependencies": { "@profullstack/keys": "^0.1.0" } }, "sha512-zc2JGLXMX8eCk7Mp4X91E175enOTNcWPZncKf3LXzoGE+XEhHDJHM1LRZkkY3x2pjLYX3AB11Vx/TP3cobSQ/g=="],
 
     "@simplewebauthn/browser": ["@simplewebauthn/browser@14.0.0", "", {}, "sha512-1odWVqeEBTl7lJ9zMKLEsmTlnyrDO5iRcTvfMKKk1WThUnp/i8JJdffdj2icP+tty159s4PgwE3BiMoEW9NFow=="],
 
