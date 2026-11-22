@@ -199,7 +199,14 @@ const INTENTS = [
   ['insurance', /\b(insurance|coverage|payer|plan id|member id)\b/],
 ];
 const DOC_TYPES = new Set(['DocumentReference', 'DiagnosticReport', 'Composition']);
-const MAX_CONTEXT_CHARS = 24_000;
+// The house node is a shared CPU box: prompt size is answer latency (prefill runs at
+// tens of tokens a second there). Tunable without a deploy of code.
+const envInt = (name, dflt, min, max) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= min && n <= max ? Math.floor(n) : dflt;
+};
+const MAX_CONTEXT_CHARS = envInt('ASK_MAX_CONTEXT_CHARS', 24_000, 4_000, 60_000);
+const ANSWER_MAX_TOKENS = envInt('ASK_MAX_TOKENS', 800, 100, 1024);
 const MAX_FILE_EXCERPT = 3_000;
 const MAX_FILES_READ = 8;
 const MAX_RECORDS_SCANNED = 5_000;
@@ -396,7 +403,7 @@ export async function buildContext(scope, question) {
     if (DOC_TYPES.has(rec.resource_type)) rec._text = inlineText(rec.resource).toLowerCase().slice(0, 50_000) || null;
   }
   const ts = terms(question);
-  const picked = select(rows, question, { maxChars: MAX_CONTEXT_CHARS - 9000 });
+  const picked = select(rows, question, { maxChars: Math.max(2_000, MAX_CONTEXT_CHARS - Math.floor(MAX_CONTEXT_CHARS * 0.375)) });
 
   // Read the attachments of the picked documents (most relevant first).
   const notRead = [];
@@ -520,7 +527,7 @@ export async function ask(asker, scope, question, { link = () => null, onSend = 
   const auditId = await onSend({ records: ctx.picked.map((p) => p.rec.id), lane: 'house', c0mpute_account: conn.account_id });
   let out;
   try {
-    out = await c0.askHouse(token, messagesFor(q, ctx.lines), { maxTokens: 800, signal });
+    out = await c0.askHouse(token, messagesFor(q, ctx.lines), { maxTokens: ANSWER_MAX_TOKENS, signal });
     await onDone(auditId, { outcome: 'answered', model: out.meta?.model ?? out.model ?? null, operator: out.meta?.operator ?? null });
   } catch (err) {
     await onDone(auditId, { outcome: `failed: ${err.reason ?? 'error'}` }).catch(() => {});
@@ -557,7 +564,8 @@ export async function ask(asker, scope, question, { link = () => null, onSend = 
     model: meta.model ?? out.model ?? null,
     lane: 'house',
     operator: meta.operator ?? null,
-    cost_usd: meta.estimated_cost_usd ?? null,
+    // c0mpute reports what was actually charged (charged_usd); an estimate only when the charge is still pending.
+    cost_usd: meta.charged_usd ?? meta.estimated_cost_usd ?? null,
     disclaimer: NOT_MEDICAL_ADVICE,
   };
 }
