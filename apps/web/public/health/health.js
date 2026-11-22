@@ -1,5 +1,6 @@
 import * as vaultCrypto from '/assets/vault-crypto.js';
 import { UNITS, PLACEHOLDERS, displayReading, resolveUnits, detectUnits } from '/assets/units.js';
+import * as shareFormat from '/assets/share-format.js';
 
 const sessionResponse = await fetch('/api/v1/me', { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
 if (!sessionResponse?.ok) {
@@ -41,6 +42,7 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 let vaultHandle = null;
 let vaultUserId = null;
 let lockTimer = null;
+let currentEntries = [];
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -135,6 +137,7 @@ async function renderEntries() {
     entries.push(entry);
   }
   entries.sort((a, b) => String(b.takenAt).localeCompare(String(a.takenAt)));
+  currentEntries = entries;
   rows.replaceChildren();
   empty.hidden = entries.length > 0;
   table.hidden = entries.length === 0;
@@ -170,6 +173,8 @@ function lockTracker() {
   if (vaultHandle) vaultCrypto.lockVault(vaultHandle);
   vaultHandle = null;
   vaultUserId = null;
+  currentEntries = [];
+  resetSharePanels();
   rows.replaceChildren();
   table.hidden = true;
   form.reset();
@@ -351,6 +356,264 @@ async function handleImport(event) {
     message.textContent = err.message || 'This file is not a valid encrypted tracker backup.';
   }
 }
+
+/* ------------------------------------------------------------- sharing -- */
+// A share is a copy of the readings encrypted under a one-time passkey made
+// here. Only ciphertext is uploaded; the passkey is shown once and never sent.
+
+const shareCard = document.getElementById('share-card');
+const shareForm = document.getElementById('share-form');
+const shareResult = document.getElementById('share-result');
+const shareStatus = document.getElementById('share-status');
+const sharesList = document.getElementById('shares');
+const importSharedCard = document.getElementById('import-shared-card');
+const importSharedForm = document.getElementById('import-shared-form');
+const importSharedStatus = document.getElementById('import-shared-status');
+const providerFind = document.getElementById('provider-find');
+const providerResults = document.getElementById('provider-results');
+const providerStatus = document.getElementById('provider-status');
+
+function resetSharePanels() {
+  shareCard.hidden = true;
+  importSharedCard.hidden = true;
+  shareResult.hidden = true;
+  shareForm.hidden = false;
+  shareForm.reset();
+  importSharedForm.reset();
+  document.getElementById('share-link').value = '';
+  document.getElementById('share-passkey').value = '';
+  sharesList.replaceChildren();
+  providerResults.replaceChildren();
+  shareStatus.textContent = '';
+  importSharedStatus.textContent = '';
+}
+
+async function apiJson(path, options = {}) {
+  const res = await fetch(`/api/v1${path}`, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    ...options,
+    headers: options.body ? { 'content-type': 'application/json' } : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'The request failed. Try again.');
+  return data;
+}
+
+async function loadShares() {
+  const { shares } = await apiJson('/health/shares');
+  sharesList.replaceChildren();
+  document.getElementById('shares-empty').hidden = shares.length > 0;
+  for (const share of shares) {
+    let label = 'Created on another device';
+    if (!share.label) label = 'No label';
+    else {
+      try {
+        label = decoder.decode(await vaultCrypto.decryptObject(vaultHandle, vaultUserId, share.id, shareFormat.fromBase64Url(share.label)));
+      } catch {}
+    }
+    const item = document.createElement('li');
+    const text = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = label;
+    const meta = document.createElement('small');
+    const opened = share.views ? `opened ${share.views} time${share.views === 1 ? '' : 's'}, last ${formatDate(share.last_viewed_at)}` : 'not opened yet';
+    meta.textContent = `Shared ${formatDate(share.created_at)} · expires ${formatDate(share.expires_at)} · ${opened}`;
+    text.append(name, document.createElement('br'), meta);
+    const revoke = document.createElement('button');
+    revoke.type = 'button';
+    revoke.textContent = 'Revoke';
+    revoke.setAttribute('aria-label', `Revoke the share for ${label}`);
+    revoke.addEventListener('click', async () => {
+      if (!confirm('Revoke this share? The link stops working and the encrypted copy is deleted from tleehealth.')) return;
+      try {
+        await apiJson(`/health/shares/${share.id}`, { method: 'DELETE' });
+        await loadShares();
+      } catch (err) {
+        shareStatus.textContent = err.message;
+      }
+    });
+    item.append(text, revoke);
+    sharesList.append(item);
+  }
+}
+
+document.getElementById('open-share').addEventListener('click', () => {
+  importSharedCard.hidden = true;
+  shareCard.hidden = false;
+  shareResult.hidden = true;
+  shareForm.hidden = false;
+  if (!shareForm.elements.from.value) shareForm.elements.from.value = me?.user?.name ?? '';
+  shareStatus.textContent = currentEntries.length ? '' : 'Add a reading first. There is nothing to share yet.';
+  loadShares().catch((err) => { shareStatus.textContent = err.message; });
+  shareCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+document.getElementById('close-share').addEventListener('click', resetSharePanels);
+document.getElementById('share-another').addEventListener('click', () => {
+  shareResult.hidden = true;
+  shareForm.hidden = false;
+  document.getElementById('share-link').value = '';
+  document.getElementById('share-passkey').value = '';
+});
+
+shareForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!currentEntries.length) { shareStatus.textContent = 'Add a reading first. There is nothing to share yet.'; return; }
+  const data = new FormData(shareForm);
+  const submit = document.getElementById('share-submit');
+  submit.disabled = true;
+  shareStatus.textContent = 'Encrypting in this browser…';
+  try {
+    const id = makeId();
+    const passkey = shareFormat.generatePasskey();
+    const payload = shareFormat.buildSharePayload({ readings: currentEntries, from: data.get('from'), message: data.get('message') });
+    const sealed = await shareFormat.sealShare(id, passkey, payload);
+    const label = String(data.get('label') ?? '').trim().slice(0, 120);
+    const sealedLabel = label ? await vaultCrypto.encryptObject(vaultHandle, vaultUserId, id, encoder.encode(label)) : null;
+    const { share } = await apiJson('/health/shares', {
+      method: 'POST',
+      body: JSON.stringify({
+        id,
+        expires_days: Number(data.get('expires_days')),
+        envelope: sealed.envelope,
+        ciphertext: shareFormat.toBase64Url(sealed.ciphertext),
+        label: sealedLabel ? shareFormat.toBase64Url(sealedLabel) : null,
+      }),
+    });
+    document.getElementById('share-link').value = `${location.origin}/share/${share.id}`;
+    document.getElementById('share-passkey').value = passkey;
+    shareForm.hidden = true;
+    shareResult.hidden = false;
+    shareStatus.textContent = '';
+    shareForm.elements.label.value = '';
+    shareForm.elements.message.value = '';
+    await loadShares();
+    resetIdleTimer();
+  } catch (err) {
+    shareStatus.textContent = err.message || 'Could not create the share.';
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+for (const button of document.querySelectorAll('[data-copy]')) {
+  button.addEventListener('click', async () => {
+    const field = document.getElementById(button.dataset.copy);
+    const original = button.textContent;
+    try {
+      await navigator.clipboard.writeText(field.value);
+      button.textContent = 'Copied';
+    } catch {
+      field.select();
+      button.textContent = 'Press Ctrl+C';
+    }
+    setTimeout(() => { button.textContent = original; }, 1800);
+  });
+}
+
+// The label can be picked from the provider directory instead of typed.
+document.getElementById('toggle-provider-find').addEventListener('click', async () => {
+  providerFind.hidden = !providerFind.hidden;
+  const states = document.getElementById('provider-state');
+  if (!providerFind.hidden && states.options.length === 1) {
+    try {
+      const meta = await apiJson('/providers/specialties');
+      for (const code of meta.states) states.append(new Option(code, code));
+    } catch {}
+  }
+  if (!providerFind.hidden) document.getElementById('provider-q').focus();
+});
+
+async function searchProviders() {
+  const q = document.getElementById('provider-q').value.trim();
+  const state = document.getElementById('provider-state').value;
+  providerResults.replaceChildren();
+  if (q.length < 2) { providerStatus.textContent = 'Enter at least two letters of the name.'; return; }
+  providerStatus.textContent = 'Searching…';
+  try {
+    const { results } = await apiJson(`/providers?${new URLSearchParams({ q, ...(state ? { state } : {}) })}`);
+    providerStatus.textContent = results.length ? 'Choose one to use as the label.' : 'No provider matched. Try the last name only, or another state.';
+    for (const provider of results.slice(0, 12)) {
+      const item = document.createElement('li');
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      const name = document.createElement('strong');
+      name.textContent = provider.credential ? `${provider.name}, ${provider.credential}` : provider.name;
+      const detail = document.createElement('small');
+      detail.textContent = [provider.specialty, [provider.city, provider.state].filter(Boolean).join(', '), `NPI ${provider.npi}`].filter(Boolean).join(' · ');
+      pick.append(name, detail);
+      pick.addEventListener('click', () => {
+        document.getElementById('share-label').value = `${name.textContent} (NPI ${provider.npi})`.slice(0, 120);
+        providerFind.hidden = true;
+        providerResults.replaceChildren();
+        providerStatus.textContent = '';
+      });
+      item.append(pick);
+      providerResults.append(item);
+    }
+  } catch (err) {
+    providerStatus.textContent = err.message;
+  }
+}
+document.getElementById('provider-search').addEventListener('click', searchProviders);
+document.getElementById('provider-q').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  searchProviders();
+});
+
+// Readings someone else shared: opened with their link and passkey, then
+// encrypted again under this tracker's own key before they are saved.
+document.getElementById('open-import-shared').addEventListener('click', () => {
+  shareCard.hidden = true;
+  importSharedCard.hidden = false;
+  importSharedStatus.textContent = '';
+  importSharedCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  importSharedForm.elements.link.focus();
+});
+document.getElementById('close-import-shared').addEventListener('click', resetSharePanels);
+
+importSharedForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const data = new FormData(importSharedForm);
+  const submit = importSharedForm.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  importSharedStatus.textContent = 'Opening the share…';
+  try {
+    const id = shareFormat.shareIdFrom(data.get('link'));
+    const sealed = await apiJson(`/shared/${id}`);
+    const payload = await shareFormat.openShare(id, String(data.get('passkey')), sealed.envelope, shareFormat.fromBase64Url(sealed.ciphertext));
+    const have = new Set(currentEntries.map((entry) => `${entry.kind}|${entry.value}|${entry.takenAt}`));
+    const origin = payload.from ? `Shared by ${payload.from}` : 'Shared reading';
+    let added = 0;
+    for (const reading of payload.readings) {
+      const key = `${reading.kind}|${reading.value}|${reading.takenAt}`;
+      if (have.has(key)) continue;
+      have.add(key);
+      const entry = {
+        id: makeId(),
+        kind: reading.kind,
+        value: reading.value,
+        takenAt: reading.takenAt,
+        note: (reading.note ? `${reading.note} (${origin})` : origin).slice(0, 500),
+      };
+      if (UNITS[entry.kind]) entry.unit = reading.unit;
+      if (!validValue(entry)) continue;
+      const ciphertext = await vaultCrypto.encryptObject(vaultHandle, vaultUserId, entry.id, encoder.encode(JSON.stringify(entry)));
+      await putSealed({ id: entry.id, ciphertext });
+      added += 1;
+    }
+    importSharedForm.reset();
+    const skipped = payload.readings.length - added;
+    importSharedStatus.textContent = `${added} reading${added === 1 ? '' : 's'} imported and encrypted on this device${skipped ? `; ${skipped} already here` : ''}.`;
+    await renderEntries();
+    resetIdleTimer();
+  } catch (err) {
+    importSharedStatus.textContent = err.message || 'Could not import that share.';
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 kind.addEventListener('change', updateKind);
 const unitsSelect = document.getElementById('units');

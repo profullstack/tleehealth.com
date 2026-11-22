@@ -30,6 +30,7 @@ import {
   createVault, decryptObject, encryptObject, lockVault, packFile, rewrapVaultKey,
   unlockWithPassphrase, unlockWithRecoveryKey, unpackFile,
 } from './vault-crypto.js';
+import { fromBase64Url, openShare, shareIdFrom, toCsv, toFhirBundle, toText } from './share-format.js';
 import {
   caseload, connect, connection, disconnect, exportRecords, health, logTime, providers, recordAccess, recordFile, recordItems, records,
   deleteRecordVault, deleteRecordVaultObject, downloadRecordVaultObject, me, readRecordVaultManifest,
@@ -37,7 +38,11 @@ import {
   schedule, shareConnection, superbill, syncConnection, uploadRecordVaultObject,
   applyCredits, createInvite, creditBalance, invites, redeemCode,
   askRecords, c0mputeDisconnect, c0mputeStatus,
+  providerByNpi, providerDirectory, readingShares, revokeReadingShare, sharedReadings,
 } from './client.js';
+
+const formatProvider = (p) =>
+  `${p.npi}  ${(p.credential ? `${p.name}, ${p.credential}` : p.name).slice(0, 40).padEnd(40)} ${(p.specialty || '-').slice(0, 34).padEnd(34)} ${[p.city, p.state].filter(Boolean).join(', ')}${p.phone ? `  ${p.phone}` : ''}`;
 
 const HELP = `tleehealth: telehealth and practice management.
 
@@ -59,6 +64,12 @@ Ask AI about your records (paid from your c0mpute.com balance; connect c0mpute o
   tleehealth ask "QUESTION" [--patient PATIENT_ID] [--json]         answer from your imported records, with the records it used
   tleehealth c0mpute [status|disconnect] [--json]                   your c0mpute connection and balance
   Not medical advice: talk with your clinician before any decision; in an emergency call 911 (988 for a crisis).
+
+Health tracker shares and the provider directory:
+  tleehealth shared LINK [--format text|csv|fhir|json] [--out FILE]  open readings someone shared (asks for the passkey; decrypts locally)
+  tleehealth shares [--revoke ID] [--json]                          your active shares, or revoke one
+  tleehealth directory [NAME] [--specialty S] [--city C] [--state ST] [--zip Z] [--type individual|organization] [--npi N]
+                                                                    find a US doctor, clinic or hospital
 
 End-to-end encrypted personal vault (client-side encryption; separate from legacy records):
   tleehealth vault status                                           vault setup and encrypted file count
@@ -450,6 +461,53 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const auth = await resolveAuth({ server: flags.server, key: flags.key });
   switch (cmd) {
+    case 'shared': {
+      if (!rest[0]) throw new Error('usage: tleehealth shared LINK [--format text|csv|fhir|json] [--out FILE]');
+      const id = shareIdFrom(rest[0]);
+      const sealed = await sharedReadings(auth, id);
+      const passkey = typeof flags.passkey === 'string' ? flags.passkey : process.env.TLEEHEALTH_SHARE_PASSKEY || await promptSecret('Share passkey');
+      const payload = await openShare(id, passkey, sealed.envelope, fromBase64Url(sealed.ciphertext));
+      const format = typeof flags.format === 'string' ? flags.format : 'text';
+      const text = format === 'csv' ? toCsv(payload)
+        : format === 'fhir' ? `${JSON.stringify(toFhirBundle(payload), null, 2)}\n`
+        : format === 'json' ? `${JSON.stringify(payload, null, 2)}\n`
+        : format === 'text' ? toText(payload) : null;
+      if (text === null) throw new Error('--format must be text, csv, fhir or json');
+      if (typeof flags.out === 'string') {
+        await writeFile(flags.out, text, { mode: 0o600, flag: 'wx' });
+        console.log(`${payload.readings.length} readings written to ${flags.out} (mode 0600).`);
+      } else process.stdout.write(text);
+      return 0;
+    }
+    case 'shares': {
+      if (typeof flags.revoke === 'string') {
+        await revokeReadingShare(auth, flags.revoke);
+        console.log('Share revoked. The link no longer works and the encrypted copy is deleted.');
+        return 0;
+      }
+      const { shares } = await readingShares(auth);
+      if (flags.json) console.log(JSON.stringify(shares, null, 2));
+      else if (!shares.length) console.log('Nothing is shared right now. Share readings from the tracker at /health/.');
+      else for (const s of shares) console.log(`${s.id}  shared ${String(s.created_at).slice(0, 10)}  expires ${String(s.expires_at).slice(0, 10)}  opened ${s.views}x`);
+      return 0;
+    }
+    case 'directory': {
+      if (typeof flags.npi === 'string') {
+        const { provider } = await providerByNpi(auth, flags.npi);
+        console.log(flags.json ? JSON.stringify(provider, null, 2) : formatProvider(provider));
+        return 0;
+      }
+      const found = await providerDirectory(auth, {
+        q: rest.join(' ') || undefined, specialty: flags.specialty, city: flags.city, state: flags.state, zip: flags.zip, type: flags.type, page: flags.page,
+      });
+      if (flags.json) console.log(JSON.stringify(found, null, 2));
+      else if (!found.results.length) console.log('No provider matched. Try the last name only, or fewer filters.');
+      else {
+        for (const p of found.results) console.log(formatProvider(p));
+        if (found.more) console.log(`more: --page ${found.page + 1}`);
+      }
+      return 0;
+    }
     case 'vault':
       return vaultCommand(auth, rest[0] ?? 'status', rest.slice(1), flags);
     case 'health': {

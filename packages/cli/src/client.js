@@ -180,6 +180,24 @@ export const exportRecords = (auth, { format, connection } = {}) =>
 
 export const recordFile = (auth, id) => download(auth, `/api/v1/records/files/${encodeURIComponent(id)}`);
 
+/* ----------------------------------------------- shared tracker readings -- */
+// Readings shared from the health tracker are encrypted under a share passkey.
+// These calls move ciphertext; ./share-format.js opens it locally.
+
+/** The encrypted share behind a link. No key needed: the passkey is the gate. */
+export const sharedReadings = (auth, id) => call({ ...auth, key: '' }, `/api/v1/shared/${encodeURIComponent(id)}`);
+
+/** Your active shares: ids, dates and how often each was opened. */
+export const readingShares = (auth) => call(auth, '/api/v1/health/shares');
+
+export const revokeReadingShare = (auth, id) => call(auth, `/api/v1/health/shares/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+/** The provider directory: every US clinician and organization holding an NPI. */
+export const providerDirectory = (auth, { q, specialty, city, state, zip, type, page } = {}) =>
+  call({ ...auth, key: '' }, `/api/v1/providers${qs({ q, specialty, city, state, zip, type, page })}`);
+
+export const providerByNpi = (auth, npi) => call({ ...auth, key: '' }, `/api/v1/providers/${encodeURIComponent(npi)}`);
+
 /** Who at which practice viewed, downloaded or exported the records you shared. */
 export const recordAccess = (auth) => call(auth, '/api/v1/records/access');
 

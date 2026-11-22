@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0A0D0C">
+  <meta name="description" content="Find any US doctor, clinician, hospital, pharmacy or clinic by name, specialty and location. Every provider holding an NPI, from the public CMS registry.">
+  <title>Provider directory · tleehealth</title>
+  <link rel="canonical" href="https://tleehealth.pwa.pit.world/providers">
+  <link rel="icon" href="/icon.svg">
+  <link rel="stylesheet" href="/assets/tracker.css">
+  <script type="module" src="/assets/providers.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <a class="brand" href="/">tleehealth</a>
+      <nav class="top-links"><a class="account" href="/health/">Health tracker</a><a class="account" href="/portal">My health portal</a></nav>
+    </header>
+    <section class="intro">
+      <p class="eyebrow">Provider directory</p>
+      <h1>Find a doctor, clinic or hospital.</h1>
+      <p class="lede">Every US clinician and healthcare organization that holds an NPI: search by name, specialty and location, then share your home readings with them from your private tracker.</p>
+    </section>
+    <section class="card" id="search-card">
+      <form id="dir-form" class="dir-form" role="search">
+        <label>Name or practice<input name="q" type="search" autocomplete="off" placeholder="For example, Rivera or Mercy Clinic"></label>
+        <label>Specialty<select name="specialty"><option value="">Any specialty</option></select></label>
+        <label>Type<select name="type"><option value="">People and organizations</option><option value="individual">People</option><option value="organization">Organizations</option></select></label>
+        <label>City<input name="city" type="text" autocomplete="address-level2"></label>
+        <label>State<select name="state"><option value="">Any state</option></select></label>
+        <label>ZIP code<input name="zip" type="text" inputmode="numeric" maxlength="5" pattern="[0-9]{5}" autocomplete="postal-code"></label>
+        <div class="actions"><button class="primary" type="submit">Search</button><span class="hint" id="dir-status" role="status"></span></div>
+      </form>
+      <div class="chips" id="chips" aria-label="Browse by specialty"></div>
+    </section>
+    <section class="card" id="results-card" hidden>
+      <div class="card-head"><div><p class="eyebrow">Results</p><h2 id="results-title">Providers</h2></div></div>
+      <ul class="dir-list" id="results"></ul>
+      <div class="pager" id="pager" hidden><a class="button" id="prev" href="#">Previous</a><span class="hint" id="page-label"></span><a class="button" id="next" href="#">Next</a></div>
+    </section>
+    <section class="card detail" id="detail-card" hidden>
+      <div class="card-head"><div><p class="eyebrow" id="detail-type">Provider</p><h2 id="detail-name"></h2></div><a class="button" href="/providers" id="back">Back to search</a></div>
+      <div class="card-b"><dl id="detail-list"></dl></div>
+      <div class="card-b actions"><a class="button primary" href="/health/">Share my readings with this provider</a><a class="button" id="detail-registry" href="#" rel="noopener">Official registry record</a></div>
+    </section>
+    <footer><span>Source: NPPES, Centers for Medicare &amp; Medicaid Services (US public domain), the registry behind <a href="https://nichedb.dev/f/providers" rel="noopener">NicheDB's health providers data</a>. An NPI is not proof of a license. People are listed by city only.</span></footer>
+  </main>
+</body>
+</html>

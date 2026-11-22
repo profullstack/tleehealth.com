@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0A0D0C">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Shared health readings · tleehealth</title>
+  <link rel="icon" href="/icon.svg">
+  <link rel="stylesheet" href="/assets/tracker.css">
+  <script type="module" src="/assets/share.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <a class="brand" href="/">tleehealth</a>
+      <a class="account" href="/providers">Provider directory</a>
+    </header>
+    <section class="intro">
+      <p class="eyebrow">Shared health readings</p>
+      <h1>Someone shared their readings with you.</h1>
+      <p class="lede">Enter the share passkey they gave you. The readings are decrypted in this browser; tleehealth stores only an encrypted copy and cannot read it.</p>
+    </section>
+    <section class="card" id="gate-card">
+      <div class="card-b" id="gate" aria-live="polite">
+        <p class="hint">Checking the share link…</p>
+      </div>
+    </section>
+    <template id="gate-template">
+      <p class="eyebrow">Passkey needed</p><h2>Open the shared readings</h2>
+      <form id="open-form" class="gate-form">
+        <label>Share passkey<input name="passkey" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" required></label>
+        <button class="primary" type="submit">Open readings</button><p class="hint" id="gate-message" role="status"></p>
+      </form>
+      <p class="hint" id="expiry"></p>
+    </template>
+    <div id="shared" hidden>
+      <section class="card">
+        <div class="card-head list-head">
+          <div><p class="eyebrow" id="shared-eyebrow">Shared readings</p><h2 id="shared-title">Readings</h2><p class="hint share-meta" id="shared-meta"></p></div>
+          <div class="actions tools">
+            <button type="button" class="primary" id="dl-fhir">Download FHIR bundle</button>
+            <button type="button" id="dl-csv">Download CSV</button>
+            <button type="button" id="dl-json">Download JSON</button>
+            <button type="button" id="print">Print</button>
+          </div>
+        </div>
+        <p class="share-message" id="shared-message" hidden></p>
+        <div class="table-wrap"><table><thead><tr><th>Measurement</th><th>Reading</th><th>Date</th><th>Note</th></tr></thead><tbody id="rows"></tbody></table></div>
+      </section>
+      <section class="notice import-help">
+        <strong>Importing into your system.</strong> The FHIR bundle is a FHIR R4 collection of Observation resources with LOINC codes and UCUM units, the format EHRs and health apps import. The CSV opens in any spreadsheet. If you use tleehealth yourself, open your <a href="/health/">health tracker</a>, choose <em>Import shared readings</em> and paste this link and passkey.
+      </section>
+      <footer><span>Self-reported by the person who shared them. Not a diagnosis or medical advice.</span><button type="button" id="close">Close and lock</button></footer>
+    </div>
+  </main>
+</body>
+</html>
