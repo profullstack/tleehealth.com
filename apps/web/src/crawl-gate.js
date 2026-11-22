@@ -19,7 +19,7 @@ export function createCrawlGate(env = process.env) {
     coinpay: { apiKey },
     payTo,
     contact: 'mailto:anthony@profullstack.com',
-    openPaths: ['/healthz', '/install.sh', '/llms.txt', '/api/', '/webhooks/', '/i/'],
+    openPaths: ['/healthz', '/install.sh', '/llms.txt', '/robots.txt', '/sitemap.xml', '/api/', '/webhooks/', '/i/'],
     // A session cookie that is merely present is a hint, never a pass (x402-gateway
     // 0.18.3): it spares a signed-in reader's odd browser string, but GPTBot with a
     // made-up cookie is still charged. It used to be `exempt`, which let it read free.

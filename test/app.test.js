@@ -12,6 +12,18 @@ describe('web', () => {
     expect(html).toContain('$199');
     expect(html).toContain('$10');
   });
+  test('sitemap.xml lists the public pages and robots.txt points at it', async () => {
+    const sm = await get('/sitemap.xml');
+    expect(sm.status).toBe(200);
+    expect(sm.headers.get('content-type')).toContain('application/xml');
+    const xml = await sm.text();
+    expect(xml).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
+    expect(xml).toMatch(/<loc>[^<]+\/terms<\/loc>/);
+    expect(xml).not.toContain('/portal');
+    const robots = await (await get('/robots.txt')).text();
+    expect(robots).toContain('Disallow: /app');
+    expect(robots).toMatch(/Sitemap: \S+\/sitemap\.xml/);
+  });
   test('the app shell is served for every app route', async () => {
     for (const path of ['/app', '/app/patients', '/signin', '/portal']) {
       const res = await get(path);
