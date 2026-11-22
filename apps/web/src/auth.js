@@ -8,6 +8,10 @@ import {
 } from '@simplewebauthn/server';
 import { config } from './config.js';
 
+const APP_VERSION = process.env.npm_package_version;
+/** Names this app on CoinPay's side: every fleet app reaches it from one IP. */
+const COINPAY_UA = `tleehealth.com${APP_VERSION ? `/${APP_VERSION}` : ''} (+https://tleehealth.com)`;
+
 /**
  * Magic link + passkey. No passwords. Ported from bg0ne's auth package.
  *
@@ -168,6 +172,7 @@ export async function coinPayIdentityFromCode(code, codeVerifier) {
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
       accept: 'application/json',
+      'user-agent': COINPAY_UA,
     },
     body: new URLSearchParams({
       grant_type: 'authorization_code',
@@ -184,7 +189,7 @@ export async function coinPayIdentityFromCode(code, codeVerifier) {
     throw new Error(`CoinPay sign-in failed: ${tokenResponse.status} ${tokens?.error ?? ''} ${tokens?.error_description ?? ''}`.trim());
 
   const userResponse = await fetch(config.coinpayOAuth.userInfoUrl, {
-    headers: { authorization: `Bearer ${tokens.access_token}`, accept: 'application/json' },
+    headers: { authorization: `Bearer ${tokens.access_token}`, accept: 'application/json', 'user-agent': COINPAY_UA },
     redirect: 'error',
     signal: AbortSignal.timeout(10_000),
   });
