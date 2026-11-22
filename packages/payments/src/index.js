@@ -78,6 +78,22 @@ export function paymentProperty() {
   return host;
 }
 
+/**
+ * The User-Agent on our calls to CoinPay. Every fleet app reaches CoinPay from
+ * one IP, so this names the brand (and its version) for CoinPay's logs and
+ * throttle. Derived from the property, so this file stays brand-free.
+ */
+function coinpayUserAgent() {
+  let host = '';
+  try {
+    host = paymentProperty();
+  } catch {
+    return 'profullstack-payments';
+  }
+  const version = process.env.npm_package_version;
+  return `${host}${version ? `/${version}` : ''} (+https://${host})`;
+}
+
 function hostOf(value) {
   const v = String(value).trim();
   if (!v) return '';
@@ -192,6 +208,7 @@ export async function createCheckout({
     method: 'POST',
     headers: {
       authorization: `Bearer ${coinpay.apiKey}`,
+      'user-agent': coinpayUserAgent(),
       'content-type': 'application/json',
     },
     body: JSON.stringify({
@@ -253,7 +270,7 @@ export async function getCheckoutSession(sessionId) {
   const { coinpay } = need();
   if (!/^cs_[A-Za-z0-9]+$/.test(String(sessionId ?? ''))) return null;
   const res = await fetch(`${baseUrlOf(coinpay)}/api/checkout/sessions/${sessionId}`, {
-    headers: { authorization: `Bearer ${coinpay.apiKey}` },
+    headers: { authorization: `Bearer ${coinpay.apiKey}`, 'user-agent': coinpayUserAgent() },
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) return null;
