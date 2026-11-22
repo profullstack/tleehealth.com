@@ -19,7 +19,9 @@ describe('web', () => {
     const xml = await sm.text();
     expect(xml).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
     expect(xml).toMatch(/<loc>[^<]+\/terms<\/loc>/);
+    expect(xml).toMatch(/<loc>[^<]+\/providers<\/loc>/);
     expect(xml).not.toContain('/portal');
+    expect(xml).not.toContain('/share');
     const robots = await (await get('/robots.txt')).text();
     expect(robots).toContain('Disallow: /app');
     expect(robots).toMatch(/Sitemap: \S+\/sitemap\.xml/);

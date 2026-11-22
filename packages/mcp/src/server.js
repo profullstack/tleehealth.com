@@ -7,6 +7,7 @@ import {
   call, resolveOrg,
   caseload, connect, dashboardDay, health, logTime, providers, recordItem, recordItems, records, resolveAuth, schedule, superbill,
   recordVaultObjects, recordVaultStatus, syncConnection,
+  providerByNpi, providerDirectory, readingShares, revokeReadingShare,
 } from '@profullstack/tleehealth/client';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -143,6 +144,36 @@ const TOOLS = [
     },
   },
   {
+    name: 'search_provider_directory',
+    description:
+      'Find a US doctor, clinician, hospital, pharmacy or clinic in the public NPI registry by name, specialty and location. Give npi alone to read one record. Needs at least a name, specialty, city or zip.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: "a person's name (\"jane smith\" or \"smith\") or an organization name" },
+        specialty: { type: 'string', description: 'a specialty id such as cardiology, family-medicine, pediatrics, pharmacy, hospital' },
+        city: { type: 'string' },
+        state: { type: 'string', description: 'two-letter US state' },
+        zip: { type: 'string', description: 'five-digit ZIP code' },
+        type: { type: 'string', enum: ['individual', 'organization'] },
+        page: { type: 'integer', minimum: 1 },
+        npi: { type: 'string', description: 'a 10-digit NPI to look up directly' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_reading_shares',
+    description:
+      "The caller's active health tracker shares: opaque ids, created and expiry dates and how many times each was opened. Shares are encrypted under a passkey this server never sees, so readings and labels are not available here.",
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'revoke_reading_share',
+    description: 'Revoke one health tracker share by id: the link stops working and the encrypted copy is deleted. Confirm with the user first.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+  },
+  {
     name: 'find_health_providers',
     description: 'Search providers the caller can connect to import records: every Epic/MyChart organization, plus a demo sandbox.',
     inputSchema: { type: 'object', properties: { q: { type: 'string', description: 'words in the organization name' } }, additionalProperties: false },
@@ -235,6 +266,16 @@ async function callTool(name, args) {
     }
     case 'list_encrypted_vault_objects':
       return textResult(await recordVaultObjects(auth, args));
+    case 'search_provider_directory': {
+      if (args.npi) return textResult(await providerByNpi(auth, args.npi));
+      return textResult(await providerDirectory(auth, args));
+    }
+    case 'list_reading_shares': {
+      const { shares } = await readingShares(auth);
+      return textResult(shares.map(({ id, created_at, expires_at, views, last_viewed_at }) => ({ id, created_at, expires_at, views, last_viewed_at })));
+    }
+    case 'revoke_reading_share':
+      return textResult(await revokeReadingShare(auth, args.id));
     case 'find_health_providers':
       return textResult(await providers(auth, args.q ?? ''));
     case 'connect_health_provider':

@@ -23,13 +23,14 @@ const root = join(here, '..', '..', '..');
 const VERSION = JSON.parse(readFileSync(join(root, 'packages/cli/package.json'), 'utf8')).version;
 const INSTALL_SH = readFileSync(join(root, 'bin/install.sh'), 'utf8');
 const RECORD_VAULT_CRYPTO_JS = readFileSync(join(root, 'packages/cli/src/vault-crypto.js'));
+const SHARE_FORMAT_JS = readFileSync(join(root, 'packages/cli/src/share-format.js'));
 
 export const app = new Hono();
 
 app.use('*', async (c, next) => {
   await next();
   c.header('x-content-type-options', 'nosniff');
-  c.header('referrer-policy', 'strict-origin-when-cross-origin');
+  if (!c.res.headers.has('referrer-policy')) c.header('referrer-policy', 'strict-origin-when-cross-origin');
   if (c.req.path.startsWith('/api/')) c.header('cache-control', 'no-store');
 });
 
@@ -108,6 +109,34 @@ app.get('/assets/units.js', asset('units.js', 'text/javascript; charset=utf-8'))
 app.get('/assets/vault-crypto.js', (c) =>
   c.body(RECORD_VAULT_CRYPTO_JS, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
 );
+// Sharing: the module that seals and opens a share (also the CLI's), the
+// public page a link holder opens, and the stylesheet both pages share with
+// the tracker. The share page carries no footer, tracker or third-party code:
+// it is where someone's readings get decrypted.
+const js = (bytes) => (c) =>
+  c.body(bytes, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' });
+app.get('/assets/share-format.js', js(SHARE_FORMAT_JS));
+app.get('/assets/share.js', (c) => js(pub('share/share.js'))(c));
+app.get('/assets/providers.js', (c) => js(pub('providers/providers.js'))(c));
+app.get('/assets/tracker.css', (c) =>
+  c.body(pub('health/health.css'), 200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'no-cache' }),
+);
+app.get('/share/:id', (c) =>
+  c.body(pub('share/index.html'), 200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'private, no-store',
+    'referrer-policy': 'no-referrer',
+    'x-robots-tag': 'noindex, nofollow',
+    'content-security-policy':
+      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  }),
+);
+
+// The provider directory: public and indexable. One page renders search and
+// each provider's record from /api/v1/providers.
+app.get('/providers', (c) => page(c, 'providers/index.html'));
+app.get('/providers/:npi{[0-9]{10}}', (c) => page(c, 'providers/index.html'));
+
 // The signup form's company-from-work-email helper, from @profullstack/profile.
 app.get('/assets/profile.js', (c) =>
   c.body(PROFILE_ENHANCE_SCRIPT, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
@@ -361,7 +390,7 @@ app.get('/robots.txt', (c) =>
 );
 // The public pages on SITE_URL (https://tleehealth.pwa.pit.world). The app, the
 // portal and /health need a session, so they are left out.
-const SITEMAP_PAGES = ['/', '/signup', '/signin', '/terms', '/privacy'];
+const SITEMAP_PAGES = ['/', '/providers', '/signup', '/signin', '/terms', '/privacy'];
 app.get('/sitemap.xml', (c) =>
   c.body(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${SITEMAP_PAGES.map(
@@ -407,6 +436,10 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - GET /orgs/:org/patients/:id/records       what that patient shared with the practice (audit-logged)
 - POST /records/ask {"question","patient_id"?}  Ask AI about imported records: answer + [R#] citations, paid from the caller's own c0mpute.com balance; runs only on c0mpute's house lane (Profullstack-operated node), no transcript stored. Errors carry "reason": c0mpute_not_connected | c0mpute_locked | c0mpute_reconnect | balance_required (+top_up) | house_lane_unavailable. Not medical advice.
 - GET /c0mpute, DELETE /c0mpute             the caller's c0mpute connection (status, balance) / revoke it; connecting is in the web app at /portal/records
+- GET /providers?q=&specialty=&city=&state=&zip=&type=&page=   the provider directory: every US clinician and organization with an NPI (no key needed)
+- GET /providers/:npi, GET /providers/specialties              one provider; the specialty ids and states the search takes
+- GET|POST /health/shares, DELETE /health/shares/:id            health tracker shares: ciphertext sealed in the browser under a one-time passkey
+- GET /shared/:id                                              the encrypted share behind a link (no key needed; the passkey opens it locally)
 - GET|PUT /orgs/:org/call-settings          AI calls: on/off, hours before/after, calling window, attempts
 - POST /orgs/:org/appointments/:id/call     call the patient now ({"kind":"reminder"|"followup"})
 - GET /credits, POST /credits/redeem {code, org_id?}, POST /orgs/:org/billing/apply-credits {days}   credit codes: days of a practice's paid plan
