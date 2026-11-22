@@ -27,6 +27,14 @@
         <p class="hint">Checking the share link…</p>
       </div>
     </section>
+    <template id="gate-template">
+      <p class="eyebrow">Passkey needed</p><h2>Open the shared readings</h2>
+      <form id="open-form" class="gate-form">
+        <label>Share passkey<input name="passkey" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" required></label>
+        <button class="primary" type="submit">Open readings</button><p class="hint" id="gate-message" role="status"></p>
+      </form>
+      <p class="hint" id="expiry"></p>
+    </template>
     <div id="shared" hidden>
       <section class="card">
         <div class="card-head list-head">

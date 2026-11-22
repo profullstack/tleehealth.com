@@ -37,13 +37,7 @@ function showMessage(titleText, bodyText) {
 }
 
 function showGate(message = '') {
-  gate.innerHTML = `
-    <p class="eyebrow">Passkey needed</p><h2>Open the shared readings</h2>
-    <form id="open-form" class="gate-form">
-      <label>Share passkey<input name="passkey" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" required></label>
-      <button class="primary" type="submit">Open readings</button><p class="hint" id="gate-message" role="status"></p>
-    </form>
-    <p class="hint" id="expiry"></p>`;
+  gate.replaceChildren(document.getElementById('gate-template').content.cloneNode(true));
   document.getElementById('gate-message').textContent = message;
   document.getElementById('expiry').textContent = `This link works until ${formatDate(sealed.expires_at)}, or until the person who shared it revokes it.`;
   const form = document.getElementById('open-form');
