@@ -14,6 +14,7 @@ import { config } from './config.js';
 import * as credits from './credits.js';
 import * as calls from './calls.js';
 import * as records from './records.js';
+import * as ask from './ask.js';
 import * as telnyx from './telnyx.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -265,6 +266,18 @@ app.get('/connect/callback', async (c) => {
   return c.redirect(`${to.pathname}${to.search}`, 302);
 });
 
+// c0mpute.com sends the person back here after they allow "Ask AI" to bill
+// their compute balance. The state is single use and bound to this session.
+app.get('/connect/c0mpute/callback', async (c) => {
+  const user = await auth.userFromSession(getCookie(c, config.session.cookie));
+  if (!user) return c.redirect(`/signin?next=${encodeURIComponent('/portal/records')}`, 302);
+  const r = await ask.finishConnect(user, c.req.query()).catch((err) => ({ error: err.message, return_to: err.extra?.return_to }));
+  const to = new URL(r.return_to || '/portal/records', 'http://x');
+  if (r.error) to.searchParams.set('c0mpute_error', String(r.error).slice(0, 200));
+  else to.searchParams.set('c0mpute', 'connected');
+  return c.redirect(`${to.pathname}${to.search}`, 302);
+});
+
 app.post('/webhooks/coinpay', coinpayWebhook);
 
 // Telnyx call events for the AI calls. Signed with ed25519 over the raw body.
@@ -392,6 +405,8 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - PUT /records/connections/:id/share        {"org_id","shared"}: show a connection to a practice you are a patient of
 - GET /records/export?format=zip|bundle     download everything: readable files + raw FHIR, or one FHIR Bundle
 - GET /orgs/:org/patients/:id/records       what that patient shared with the practice (audit-logged)
+- POST /records/ask {"question","patient_id"?}  Ask AI about imported records: answer + [R#] citations, paid from the caller's own c0mpute.com balance; runs only on c0mpute's house lane (Profullstack-operated node), no transcript stored. Errors carry "reason": c0mpute_not_connected | c0mpute_locked | c0mpute_reconnect | balance_required (+top_up) | house_lane_unavailable. Not medical advice.
+- GET /c0mpute, DELETE /c0mpute             the caller's c0mpute connection (status, balance) / revoke it; connecting is in the web app at /portal/records
 - GET|PUT /orgs/:org/call-settings          AI calls: on/off, hours before/after, calling window, attempts
 - POST /orgs/:org/appointments/:id/call     call the patient now ({"kind":"reminder"|"followup"})
 - GET /credits, POST /credits/redeem {code, org_id?}, POST /orgs/:org/billing/apply-credits {days}   credit codes: days of a practice's paid plan

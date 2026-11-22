@@ -15,6 +15,19 @@ share with a practice. Automatic provider connections are paused: `POST
 /api/v1/records/connect` returns 410. The SMART/FHIR importer remains in the codebase,
 but is not the current import path.
 
+**Ask AI about my records** (`apps/web/src/ask.js`, `c0mpute.js`, `doc-text.js`):
+a patient, or a practice user on records a patient shared with that practice, asks a
+question at `/portal/records` (or the chart), `POST /api/v1/records/ask`, the MCP tool
+`ask_records` or `tleehealth ask "..."`. Retrieval is keyword + category scoring over
+`health_records` plus text pulled from imported files (PDF text layers, HTML/XML, text;
+images are listed as not read), capped at ~24k characters, with `[R#]` citations checked
+against what was sent. The question and excerpts go to c0mpute.com's house lane
+(`x-c0mpute-lane: house`, a Profullstack-operated node; 503 = fail closed, never the open
+network), paid from the asker's own c0mpute balance via OAuth (PKCE, scope `inference`,
+bound to the c0mpute account id). The c0k_ key is sealed unlock-on-use like portal tokens.
+No transcripts are stored; `audit_log.detail` records the record ids, lane and model.
+Env: `C0MPUTE_URL` (optional, default https://c0mpute.com).
+
 **End-to-end encrypted personal vault:** the PWA and CLI can encrypt user-selected
 files on-device before upload. The API stores ciphertext and an encrypted index;
 MCP exposes opaque status only and cannot decrypt the vault. Existing imported
