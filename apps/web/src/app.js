@@ -343,7 +343,21 @@ app.get('/.well-known/openwebring.json', (c) =>
 );
 app.get('/terms', (c) => page(c, 'terms.html'));
 app.get('/privacy', (c) => page(c, 'privacy.html'));
-app.get('/robots.txt', (c) => c.text('User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /portal\n'));
+app.get('/robots.txt', (c) =>
+  c.text(`User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /portal\n\nSitemap: ${config.siteUrl}/sitemap.xml\n`),
+);
+// The public pages on SITE_URL (https://tleehealth.pwa.pit.world). The app, the
+// portal and /health need a session, so they are left out.
+const SITEMAP_PAGES = ['/', '/signup', '/signin', '/terms', '/privacy'];
+app.get('/sitemap.xml', (c) =>
+  c.body(
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${SITEMAP_PAGES.map(
+      (p) => `  <url><loc>${config.siteUrl.replace(/&/g, '&amp;')}${p}</loc></url>`,
+    ).join('\n')}\n</urlset>\n`,
+    200,
+    { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' },
+  ),
+);
 app.get('/llms.txt', (c) =>
   c.text(`# tleehealth
 
