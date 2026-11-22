@@ -28,8 +28,14 @@ describe('crawl gate', () => {
   });
   test('passes browsers, signed-in users, the API and webhooks', async () => {
     expect(await ask('/', CHROME)).toBeNull();
-    expect(await ask('/', { 'user-agent': GPT, cookie: 'th_session=x' })).toBeNull();
+    expect(await ask('/', { ...CHROME, cookie: 'th_session=x' })).toBeNull();
     expect(await ask('/api/v1/me', { 'user-agent': GPT })).toBeNull();
     expect(await ask('/webhooks/coinpay', { 'user-agent': GPT })).toBeNull();
+  });
+});
+
+describe('a forged session cookie (x402-gateway 0.18.3 sessionCookie)', () => {
+  test('does not exempt GPTBot', async () => {
+    expect((await ask('/', { 'user-agent': GPT, cookie: 'th_session=forged' }))?.status).toBe(402);
   });
 });
