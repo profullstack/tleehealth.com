@@ -34,6 +34,10 @@
 <p>We use these records only to show them to you, to let you download them, and to share them with a practice <strong>when you choose to</strong>. Access is read-only: we never write to your provider's records. The access tokens your provider issues are sealed (AES-256-GCM) with a key we keep only in our server's memory while your import is unlocked, never on disk: after a restart, when the time you chose runs out, or when you press Lock, importing pauses until you reconnect.</p>
 <p><strong>Your control:</strong> you can download everything at any time (a ZIP of readable files plus the raw data, or a single FHIR file). You can share a connection with a practice and stop sharing it at any time. Disconnecting a provider deletes its tokens and every record and file imported through it from our systems. Your provider keeps its own copy.</p>
 
+<h2>Ask AI about your records</h2>
+<p>If you choose to, you can ask an AI questions about the records you imported. You connect your own <a href="https://c0mpute.com">c0mpute.com</a> account, and each question is paid from your c0mpute balance; there is no free tier for this. When you ask, we pick the records that match your question and send your question plus short excerpts of those records (summaries of results, medications, conditions and similar, and the text of matching documents) to c0mpute's <strong>house lane</strong>: a node that Profullstack, Inc. operates, not a third-party computer on c0mpute's open network. If that node is unavailable, the question fails; it is never sent anywhere else. Images and the encrypted vault are never read.</p>
+<p>We do not store your question or the answer. We log that a question was asked, by whom, about whose records, which records were sent and which model answered, so you can see it. Your c0mpute key is sealed with a key kept only in our server's memory for the time you choose; you can disconnect at any time, which revokes it. A practice can ask about your records only if you shared them with it, and its questions appear in "Who has seen your shared records". Answers can be wrong or incomplete and are not medical advice.</p>
+
 <h2>Information practices on tleehealth</h2>
 <p>When a practice uses tleehealth, it enters and manages records about its patients: appointments, medications, refill requests, lab results, visit summaries, care plans and navigation time. The practice controls that information. We process it on the practice's behalf to run the service. Every read and change of a patient chart is written to an audit log.</p>
 
@@ -49,6 +53,7 @@
   <li><strong>Resend</strong> sends sign-in links and notifications (email address and message content).</li>
   <li><strong>Telnyx</strong> places automated appointment reminder and follow-up calls when a practice turns them on and the patient has consented (phone number, call audio and transcript).</li>
   <li><strong>CoinPay</strong> processes practice subscription payments.</li>
+  <li><strong>c0mpute.com</strong> (operated by Profullstack, Inc.) runs "Ask AI" questions on its house lane and bills them to your own c0mpute account, only if you connect one (your question and the selected record excerpts).</li>
 </ul>
 <p>We do not sell personal or health information, and we do not use it for advertising. We disclose information only as described here, at your direction, or when the law requires it.</p>
 

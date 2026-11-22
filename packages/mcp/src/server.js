@@ -110,6 +110,25 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
   },
   {
+    name: 'ask_records',
+    description:
+      "Ask a question about imported health records and get an answer written only from those records, with citations ([R1]...) to the records used. Paid from the caller's own c0mpute.com balance (they connect c0mpute once in the web app at /portal/records; an empty balance returns balance_required with a top-up link). The question and the selected record excerpts are processed on a Profullstack-operated node through c0mpute's private house lane, never the open network; tleehealth stores no transcript. With patient_id, a practice user asks about records that patient shared with the practice. Can take a minute or two. Not medical advice: never use it to diagnose or change treatment.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'the question, under 1000 characters' },
+        patient_id: { type: 'string', description: 'practice users: the patient (org person id) whose shared records to ask about' },
+      },
+      required: ['question'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_c0mpute_status',
+    description: "The caller's c0mpute connection for Ask AI: connected, status (active, locked, invalid or none), account name, spendable balance and the top-up link. Never returns the key.",
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'get_encrypted_vault_status',
     description: 'Return only whether the caller has a device-encrypted personal record vault and its encrypted byte/file counts. Never returns the wrapped key, filenames, index, or medical contents; MCP cannot unlock this vault.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -195,6 +214,20 @@ async function callTool(name, args) {
       return textResult(await recordItems(auth, args));
     case 'get_health_record':
       return textResult(await recordItem(auth, args.id));
+    case 'ask_records': {
+      try {
+        return textResult(await call(auth, '/api/v1/records/ask', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(args.patient_id ? { question: args.question, patient_id: args.patient_id } : { question: args.question }),
+        }));
+      } catch (err) {
+        // The reason (balance_required, c0mpute_locked, house_lane_unavailable, ...) tells the agent what the person must do.
+        return textResult({ error: err.body?.error ?? err.message, reason: err.body?.reason ?? null, top_up: err.body?.top_up ?? null }, true);
+      }
+    }
+    case 'get_c0mpute_status':
+      return textResult(await call(auth, '/api/v1/c0mpute'));
     case 'get_encrypted_vault_status': {
       const status = await recordVaultStatus(auth);
       const { configured, objects, bytes, max_file_bytes, max_object_bytes, max_vault_bytes } = status;

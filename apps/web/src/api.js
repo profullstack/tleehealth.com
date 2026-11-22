@@ -11,6 +11,8 @@ import * as nav from './navigation.js';
 import * as records from './records.js';
 import * as recordVault from './record-vault.js';
 import * as credits from './credits.js';
+import * as ask from './ask.js';
+import { C0mputeError } from './c0mpute.js';
 
 /**
  * /api/v1: the only thing any client talks to. The browser app, the CLI, the TUI
@@ -40,6 +42,8 @@ api.onError((err, c) => {
   if (err instanceof HttpError || err instanceof records.RecordsError || err instanceof recordVault.RecordVaultError) {
     return c.json({ error: err.message }, err.status);
   }
+  if (err instanceof ask.AskError) return c.json({ error: err.message, ...err.extra }, err.status);
+  if (err instanceof C0mputeError) return c.json({ error: err.message, reason: err.reason }, err.status);
   if (err?.code === '23505') return c.json({ error: 'that already exists' }, 409);
   if (err?.code === '22P02' || err?.code === '22007' || err?.code === '22008') return c.json({ error: 'invalid value' }, 400);
   if (err?.code === '23514') return c.json({ error: 'a value is out of range' }, 400);
@@ -103,8 +107,17 @@ async function requireActive(orgId) {
   if (!b?.paid && !b?.trial) fail(402, 'this practice is unpaid; the owner can pay under Billing');
 }
 
-async function audit(orgId, userId, action, subject = null) {
-  await db()`insert into audit_log (org_id, user_id, action, subject) values (${orgId}, ${userId}, ${action}, ${subject})`;
+async function audit(orgId, userId, action, subject = null, detail = null) {
+  const sql = db();
+  const [row] = await sql`insert into audit_log (org_id, user_id, action, subject, detail) values (${orgId}, ${userId}, ${action}, ${subject}, ${detail ? sql.json(detail) : null}) returning id`;
+  return row.id;
+}
+
+/** Add to an audit row's detail (an AI query's outcome and model, once known). */
+async function auditDone(id, more) {
+  if (!id) return;
+  const sql = db();
+  await sql`update audit_log set detail = coalesce(detail, '{}'::jsonb) || ${sql.json(more)} where id = ${id}`;
 }
 
 /** A person in this org of an allowed type, or a 404/400. */
@@ -1338,7 +1351,7 @@ api.get('/records/export', async (c) => {
 
 // Who has looked at the records you shared: every practice read, file and export,
 // with the person and the practice, from the audit log.
-const ACCESS_ACTIONS = ['records.read', 'records.file', 'records.export', 'records.share', 'records.unshare'];
+const ACCESS_ACTIONS = ['records.read', 'records.file', 'records.export', 'records.share', 'records.unshare', 'records.ask'];
 api.get('/records/access', async (c) => {
   const user = await requireUser(c);
   const ids = (await myPatientRows(user)).map((p) => p.id);
@@ -1381,6 +1394,54 @@ api.get('/orgs/:org/patients/:pid/records/files/:id', async (c) => {
   const f = await records.file(null, uuid(c.req.param('id')), { orgId: me.org_id, patientId: p.id });
   await audit(me.org_id, user.id, 'records.file', p.id);
   return download(c, f);
+});
+
+/* -------------------------------------------------- ask AI about records -- */
+// Paid by the asker's own c0mpute.com account (connected with OAuth, key
+// sealed unlock-on-use). Record excerpts go only to c0mpute's house lane.
+
+api.get('/c0mpute', async (c) => c.json(await ask.status(await requireUser(c))));
+
+// Browser only: the sign-in happens at c0mpute.com in the person's browser.
+api.post('/c0mpute/connect', async (c) => {
+  if (c.req.header('authorization')) fail(403, 'connect c0mpute in the web app under Health records');
+  const user = await requireUser(c);
+  const b = await body(c);
+  return c.json(await ask.startConnect(user, { unlock_ttl: b.unlock_ttl, return_to: b.return_to }));
+});
+
+api.delete('/c0mpute', async (c) => c.json(await ask.disconnect(await requireUser(c))));
+
+api.post('/records/ask', async (c) => {
+  const user = await requireUser(c);
+  // A CPU node can take minutes: no idle cut-off for this request (Bun.serve).
+  c.env?.timeout?.(c.req.raw, 0);
+  const b = await body(c);
+  const question = str(b.question, 2000);
+  if (b.patient_id) {
+    uuid(b.patient_id, 'patient');
+    const [p] = await db()`select id, org_id, user_type from org_people where id = ${b.patient_id} and status = 'active'`;
+    if (!p || p.user_type !== 'patient') fail(404, 'no such patient');
+    const { me } = await member(c, p.org_id);
+    const [shared] = await db()`select 1 from health_connection_shares where org_id = ${me.org_id} and patient_id = ${p.id} limit 1`;
+    if (!shared) fail(403, 'this patient has not shared imported records with your practice');
+    return c.json(
+      await ask.ask(user, { orgId: me.org_id, patientId: p.id }, question, {
+        link: () => `/app/patients/${p.id}`,
+        onSend: (a) => audit(me.org_id, user.id, 'records.ask', p.id, a),
+        onDone: auditDone,
+        signal: c.req.raw.signal,
+      }),
+    );
+  }
+  return c.json(
+    await ask.ask(user, { userId: user.id }, question, {
+      link: (rec) => `/portal/records?record=${rec.id}`,
+      onSend: (a) => audit(null, user.id, 'records.ask.self', user.id, a),
+      onDone: auditDone,
+      signal: c.req.raw.signal,
+    }),
+  );
 });
 
 /* ---------------------------------------------------------------- portal -- */

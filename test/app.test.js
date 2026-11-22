@@ -118,7 +118,7 @@ describe('web', () => {
     expect((await get('/manifest.webmanifest')).status).toBe(200);
     const worker = await get('/sw.js');
     expect(worker.status).toBe(200);
-    expect(await worker.text()).toContain('tleehealth-v10');
+    expect(await worker.text()).toContain('tleehealth-v11');
     expect(await (await get('/install.sh')).text()).toContain('@profullstack/tleehealth');
   });
 });

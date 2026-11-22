@@ -816,6 +816,10 @@ async function viewChart(id) {
   return {
     html,
     bind() {
+      bindAskPanel().catch(() => {});
+      const cq = new URLSearchParams(location.search);
+      if (cq.get('c0mpute') === 'connected') toast('c0mpute connected. Ask away.');
+      if (cq.get('c0mpute_error')) toast(cq.get('c0mpute_error'), true);
       document.getElementById('book').onclick = () => appointmentModal({ patientId: id });
       document.getElementById('toggle-consent').onclick = () => {
         const on = !(p.call_consent_at && !p.call_opt_out_at);
@@ -1609,7 +1613,7 @@ function portalHead(path) {
 const CONN_BADGE = { active: 'b-ok', syncing: 'b-info', error: 'b-alert', expired: 'b-warn', locked: 'b-warn', revoked: '' };
 const fmtSize = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 let recordsPoll = null;
-const ACCESS_LABEL = { 'records.read': 'viewed', 'records.file': 'opened a file', 'records.export': 'downloaded everything', 'records.share': 'shared', 'records.unshare': 'stopped sharing' };
+const ACCESS_LABEL = { 'records.read': 'viewed', 'records.file': 'opened a file', 'records.export': 'downloaded everything', 'records.share': 'shared', 'records.unshare': 'stopped sharing', 'records.ask': 'asked AI about' };
 
 function profileCard(p, title = 'Personal information') {
   if (!p) return '';
@@ -2137,6 +2141,8 @@ async function renderRecords(q) {
     ${portalHead('/portal/records')}
     <h1>Your health records</h1>
     ${q.get('error') ? `<section class="card"><div class="card-b"><span class="badge b-alert">not connected</span> ${esc(q.get('error'))}</div></section>` : ''}
+    ${q.get('c0mpute_error') ? `<section class="card"><div class="card-b"><span class="badge b-alert">c0mpute not connected</span> ${esc(q.get('c0mpute_error'))}</div></section>` : ''}
+    ${data.total ? `<section class="card">${askPanel()}</section>` : ''}
     ${recordVaultCard(vaultStatus, vaultFiles, vaultManifestError, userId)}
     <section class="card"><div class="card-h"><h2>Existing and shared records (server-readable)</h2>${data.total ? `<span class="row" style="gap:6px"><a class="btn sm primary" href="/api/v1/records/export">Download everything</a><a class="btn sm" href="/api/v1/records/export?format=bundle" title="One HL7 FHIR file other health apps can import">FHIR</a></span>` : ''}</div><div class="card-b small dim">These older imports remain readable by tleehealth and may be shared with your practice. They are separate from the encrypted vault above.</div>${connections}</section>
     <section class="card"><div class="card-h"><h2>Find your provider</h2></div><div class="card-b stack">
@@ -2164,6 +2170,17 @@ async function renderRecords(q) {
   if (q.get('connected')) {
     toast(syncing ? 'Connected. Importing your records…' : 'Connected. Your records are in.');
     history.replaceState({}, '', '/portal/records');
+  }
+  if (q.get('c0mpute') === 'connected') {
+    toast('c0mpute connected. Ask away.');
+    history.replaceState({}, '', '/portal/records');
+  }
+  bindAskPanel().catch(() => {});
+  // A citation link: open that record.
+  if (q.get('record')) {
+    get(`/records/items/${encodeURIComponent(q.get('record'))}`)
+      .then(({ item }) => openModal(item.title ?? item.resource_type, `<div class="dim small">${esc(dot(item.provider_name, item.resource_type, item.recorded_on && String(item.recorded_on).slice(0, 10)))}</div><pre class="small" style="white-space:pre-wrap;max-height:60vh;overflow:auto">${esc(JSON.stringify(item.resource, null, 2))}</pre>`))
+      .catch((err) => toast(err.message, true));
   }
   if (syncing) recordsPoll = setTimeout(() => location.pathname === '/portal/records' && render(), 3000);
 
@@ -2235,7 +2252,135 @@ function sharedRecordsCard(r, patientId) {
       r.total
         ? `<div class="card-b dim small">${r.connections.map((c) => esc(c.provider_name)).join(', ')} · ${r.categories.map((c) => `${esc(c.label)} ${c.count}`).join(' · ')}</div>${recordsList(r.items.filter((i) => i.category !== 'profile').slice(0, 25), fileHref)}`
         : '<div class="empty">Nothing shared. The patient can connect MyChart or another portal under Health records in their portal and share it with this practice.</div>'
-    }</section>`;
+    }${r.total ? askPanel({ patientId }) : ''}</section>`;
+}
+
+/* ------------------------------------------------- ask AI about records -- */
+// Paid by the asker's own c0mpute.com balance. Record excerpts go only to
+// c0mpute's house lane (a Profullstack-operated node), never the open network.
+
+const ASK_NOTE =
+  'Not medical advice. The answer comes from an AI reading the imported records and can be wrong or incomplete. Talk with a clinician before any decision. In an emergency call 911 (988 for a mental-health crisis).';
+
+function askPanel({ patientId = null } = {}) {
+  return `<div class="card-b stack" id="ask-ai" data-patient="${patientId ?? ''}" style="border-top:1px solid var(--line)">
+    <div class="row" style="justify-content:space-between;align-items:center"><b>Ask AI about ${patientId ? 'these shared records' : 'my records'}</b><span id="ask-status" class="small dim">Checking c0mpute…</span></div>
+    <p class="small" role="note" style="margin:0;padding:8px 10px;border-radius:8px;background:var(--raise);border:1px solid var(--line-2)"><b>Not medical advice.</b> ${esc(ASK_NOTE.replace(/^Not medical advice\. /, ''))}</p>
+    <p class="dim small" style="margin:0">Questions are paid from your own <a href="https://c0mpute.com" target="_blank" rel="noopener">c0mpute.com</a> balance. The question and the matching record excerpts are processed on a Profullstack-operated node through c0mpute's private house lane, not the open network. tleehealth does not keep the question or the answer.</p>
+    <div id="ask-connect"></div>
+    <form id="ask-form" class="stack" hidden>
+      <textarea id="ask-q" maxlength="1000" placeholder="${patientId ? 'e.g. What were the last kidney function results?' : 'e.g. What was my last A1c, and is it in range?'}" aria-label="Your question"></textarea>
+      <div class="row" style="gap:8px;align-items:center"><button class="btn primary" type="submit" id="ask-go">Ask</button><span class="small dim" id="ask-wait"></span></div>
+    </form>
+    <div id="ask-answer" aria-live="polite"></div>
+  </div>`;
+}
+
+function renderAnswer(r) {
+  const byTag = Object.fromEntries(r.citations.map((c) => [c.tag, c]));
+  const body = esc(r.answer)
+    .replace(/\[(R\d+(?:, R\d+)*)\]/g, (_, list) =>
+      `<sup>${list
+        .split(', ')
+        .map((t) => (byTag[t]?.href ? `<a href="${esc(byTag[t].href)}" title="${esc(byTag[t].title)}">${t}</a>` : t))
+        .join(', ')}</sup>`,
+    )
+    .replace(/\n/g, '<br>');
+  const cites = r.citations.length
+    ? `<div class="small"><b>Records used</b><ul class="list" style="padding:0">${r.citations
+        .map((c) => `<li><span>${c.href ? `<a href="${esc(c.href)}">${esc(c.title)}</a>` : esc(c.title)}<div class="sub">${esc(dot(c.tag, c.recorded_on, c.category))}</div></span></li>`)
+        .join('')}</ul></div>`
+    : '<div class="small dim">The answer did not cite any record.</div>';
+  const unread = r.not_read?.length
+    ? `<details class="small dim"><summary>${r.not_read.length} file${r.not_read.length === 1 ? '' : 's'} not read</summary><ul>${r.not_read.map((f) => `<li>${esc(f.title ?? 'file')}: ${esc(f.reason)}</li>`).join('')}</ul></details>`
+    : '';
+  return `<div class="stack"><div style="line-height:1.5">${body}</div>${cites}${unread}
+    <div class="small dim">${esc(dot(`${r.records_considered} of ${r.records_total} records sent`, r.model, r.cost_usd != null ? `about $${Number(r.cost_usd).toFixed(4)}` : null))}</div>
+    <p class="small" style="margin:0"><b>Not medical advice.</b> Talk with your clinician before any decision.</p></div>`;
+}
+
+async function bindAskPanel() {
+  const box = document.getElementById('ask-ai');
+  if (!box) return;
+  const patientId = box.dataset.patient || null;
+  const statusEl = box.querySelector('#ask-status');
+  const connectEl = box.querySelector('#ask-connect');
+  const form = box.querySelector('#ask-form');
+  const out = box.querySelector('#ask-answer');
+  const returnTo = patientId ? `/app/patients/${patientId}` : '/portal/records';
+  const connect = async () => {
+    try {
+      const ttl = connectEl.querySelector('#ask-ttl')?.value;
+      const { authorize_url } = await post('/c0mpute/connect', { unlock_ttl: ttl, return_to: returnTo });
+      location.href = authorize_url;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
+  let s;
+  try {
+    s = await get('/c0mpute');
+  } catch (err) {
+    statusEl.textContent = 'c0mpute status unavailable';
+    return;
+  }
+  const ttlPicker = `<select id="ask-ttl" style="width:auto;min-height:34px" aria-label="Keep the connection unlocked for"><option value="8h">unlocked 8 hours</option><option value="24h" selected>unlocked 1 day</option><option value="7d">unlocked 7 days</option></select>`;
+  if (!s.connected || s.status === 'invalid') {
+    statusEl.textContent = s.status === 'invalid' ? 'c0mpute connection expired' : 'not connected';
+    connectEl.innerHTML = `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><button class="btn primary" id="ask-connect-go">Connect c0mpute</button>${ttlPicker}<a class="small" href="${esc(s.top_up)}" target="_blank" rel="noopener">Add funds on c0mpute</a></div>`;
+  } else if (s.status === 'locked') {
+    statusEl.textContent = `locked · ${s.name ?? 'c0mpute account'}`;
+    connectEl.innerHTML = `<div class="small dim">Your c0mpute connection is locked: its key is kept only in memory for the time you chose, so it locks after that or after a server restart.</div><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><button class="btn primary" id="ask-connect-go">Reconnect c0mpute to unlock</button>${ttlPicker}<button class="sm danger" id="ask-disconnect">Disconnect</button></div>`;
+  } else {
+    const bal = s.balance ? `$${Number(s.balance.spendable_usd).toFixed(2)}` : 'balance unknown';
+    statusEl.innerHTML = `${esc(s.name ?? 'c0mpute account')} · ${esc(bal)} · <a href="${esc(s.top_up)}" target="_blank" rel="noopener">add funds</a> · <button class="link" id="ask-disconnect">disconnect</button>`;
+    form.hidden = false;
+  }
+  box.querySelector('#ask-connect-go')?.addEventListener('click', connect);
+  box.querySelector('#ask-disconnect')?.addEventListener('click', async () => {
+    if (!confirm('Disconnect c0mpute? Its key is revoked and deleted here.')) return;
+    try {
+      await api('DELETE', '/c0mpute');
+      toast('c0mpute disconnected');
+      render();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const question = box.querySelector('#ask-q').value.trim();
+    if (!question) return;
+    const go = box.querySelector('#ask-go');
+    const wait = box.querySelector('#ask-wait');
+    go.disabled = true;
+    const t0 = Date.now();
+    const tick = setInterval(() => (wait.textContent = `Reading your records on the private node… ${Math.round((Date.now() - t0) / 1000)} s`), 1000);
+    out.innerHTML = '';
+    try {
+      const res = await fetch('/api/v1/records/ask', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patientId ? { question, patient_id: patientId } : { question }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const topUp = data.reason === 'balance_required' ? ` <a href="${esc(data.top_up || s.top_up)}" target="_blank" rel="noopener">Add funds on c0mpute.com</a>` : '';
+        const reconnect = ['c0mpute_locked', 'c0mpute_reconnect', 'c0mpute_not_connected'].includes(data.reason) ? ' <button class="sm" id="ask-reconnect">Reconnect c0mpute</button>' : '';
+        out.innerHTML = `<div class="small"><span class="badge ${data.reason === 'house_lane_unavailable' ? 'b-warn' : 'b-alert'}">${esc(data.reason === 'house_lane_unavailable' ? 'AI offline' : 'not answered')}</span> ${esc(data.error || `Request failed (${res.status})`)}${topUp}${reconnect}</div>`;
+        out.querySelector('#ask-reconnect')?.addEventListener('click', connect);
+        return;
+      }
+      out.innerHTML = renderAnswer(data);
+    } catch (err) {
+      out.innerHTML = `<div class="small"><span class="badge b-alert">not answered</span> ${esc(err.message)}</div>`;
+    } finally {
+      clearInterval(tick);
+      wait.textContent = '';
+      go.disabled = false;
+    }
+  });
 }
 
 render();

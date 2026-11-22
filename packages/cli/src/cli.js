@@ -12,6 +12,8 @@
  *   tleehealth export [--format zip|bundle] [--out FILE] [--connection ID]
  *   tleehealth file FILE_ID [--out FILE]
  *   tleehealth access [--json]
+ *   tleehealth ask "QUESTION" [--patient PATIENT_ID] [--json]
+ *   tleehealth c0mpute [status|disconnect]
  *   tleehealth health
  *   tleehealth login [KEY]
  *   tleehealth dashboard | tui
@@ -34,6 +36,7 @@ import {
   recordVaultStatus, resolveAuth, saveConfig, saveRecordVaultKey, saveRecordVaultManifest,
   schedule, shareConnection, superbill, syncConnection, uploadRecordVaultObject,
   applyCredits, createInvite, creditBalance, invites, redeemCode,
+  askRecords, c0mputeDisconnect, c0mputeStatus,
 } from './client.js';
 
 const HELP = `tleehealth: telehealth and practice management.
@@ -51,6 +54,11 @@ Your health records from other providers (MyChart and any SMART on FHIR portal):
   tleehealth file FILE_ID [--out FILE]                              one attached file
   tleehealth access                                                 who at which practice opened your shared records
   tleehealth disconnect CONNECTION_ID                               remove it and everything it imported
+
+Ask AI about your records (paid from your c0mpute.com balance; connect c0mpute once in the web app):
+  tleehealth ask "QUESTION" [--patient PATIENT_ID] [--json]         answer from your imported records, with the records it used
+  tleehealth c0mpute [status|disconnect] [--json]                   your c0mpute connection and balance
+  Not medical advice: talk with your clinician before any decision; in an emergency call 911 (988 for a crisis).
 
 End-to-end encrypted personal vault (client-side encryption; separate from legacy records):
   tleehealth vault status                                           vault setup and encrypted file count
@@ -126,7 +134,7 @@ export function formatSuperbill(sb) {
   return lines.join('\n');
 }
 
-const ACCESS_LABEL = { 'records.read': 'viewed', 'records.file': 'opened a file', 'records.export': 'downloaded everything', 'records.share': 'you shared', 'records.unshare': 'you stopped sharing' };
+const ACCESS_LABEL = { 'records.read': 'viewed', 'records.file': 'opened a file', 'records.export': 'downloaded everything', 'records.share': 'you shared', 'records.unshare': 'you stopped sharing', 'records.ask': 'asked AI about' };
 
 const fmtBytes = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 
@@ -491,6 +499,51 @@ export async function main(argv = process.argv.slice(2)) {
         const r = await records(auth, { connection: flags.connection });
         console.log(flags.json ? JSON.stringify(r, null, 2) : formatRecords(r));
       }
+      return 0;
+    }
+    case 'ask': {
+      const question = rest.join(' ').trim();
+      if (!question) throw new Error('usage: tleehealth ask "QUESTION" [--patient PATIENT_ID]');
+      if (!flags.json) process.stderr.write('Asking the private AI node (this can take a minute or two)…\n');
+      let r;
+      try {
+        r = await askRecords(auth, { question, patient_id: typeof flags.patient === 'string' ? flags.patient : undefined });
+      } catch (err) {
+        const reason = err.body?.reason;
+        if (reason === 'balance_required') throw new Error(`Your c0mpute balance is empty. Add funds at ${err.body.top_up ?? 'https://c0mpute.com/checkout'}, then ask again.`);
+        if (['c0mpute_not_connected', 'c0mpute_locked', 'c0mpute_reconnect'].includes(reason))
+          throw new Error(`${err.body.error} Open ${auth.server}/portal/records in your browser to connect c0mpute.`);
+        throw err;
+      }
+      if (flags.json) {
+        console.log(JSON.stringify(r, null, 2));
+        return 0;
+      }
+      console.log(r.answer);
+      if (r.citations.length) {
+        console.log('\nRecords used:');
+        for (const c of r.citations) console.log(`  [${c.tag}] ${c.recorded_on ?? 'undated'}  ${c.title}${c.href ? `  ${auth.server}${c.href}` : ''}`);
+      }
+      if (r.not_read?.length) console.log(`\nNot read: ${r.not_read.map((f) => `${f.title} (${f.reason})`).join('; ')}`);
+      console.log(`\n${r.records_considered} of ${r.records_total} records sent${r.model ? ` · ${r.model}` : ''}${r.cost_usd != null ? ` · about $${Number(r.cost_usd).toFixed(4)}` : ''}`);
+      console.log(r.disclaimer);
+      return 0;
+    }
+    case 'c0mpute': {
+      const action = rest[0] ?? 'status';
+      if (action === 'disconnect') {
+        await c0mputeDisconnect(auth);
+        console.log('c0mpute disconnected; its key was revoked and deleted.');
+        return 0;
+      }
+      if (action !== 'status') throw new Error('usage: tleehealth c0mpute [status|disconnect]');
+      const s = await c0mputeStatus(auth);
+      if (flags.json) console.log(JSON.stringify(s, null, 2));
+      else if (!s.connected) console.log(`Not connected. Connect c0mpute at ${auth.server}/portal/records, then add funds at ${s.top_up}.`);
+      else
+        console.log(
+          `${s.name ?? 'c0mpute account'}  ${s.status}${s.balance ? `  balance $${Number(s.balance.spendable_usd).toFixed(2)}` : ''}${s.unlocked_until ? `  unlocked until ${String(s.unlocked_until).slice(0, 16).replace('T', ' ')}` : ''}${s.status === 'locked' ? `\nLocked: reconnect at ${auth.server}/portal/records to unlock.` : ''}`,
+        );
       return 0;
     }
     case 'access': {

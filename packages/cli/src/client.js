@@ -183,6 +183,22 @@ export const recordFile = (auth, id) => download(auth, `/api/v1/records/files/${
 /** Who at which practice viewed, downloaded or exported the records you shared. */
 export const recordAccess = (auth) => call(auth, '/api/v1/records/access');
 
+/**
+ * Ask AI about imported records, paid from your c0mpute.com balance (connect
+ * c0mpute once in the web app under Health records). patient_id: a practice
+ * user asking about records a patient shared with the practice.
+ */
+export const askRecords = (auth, { question, patient_id } = {}) =>
+  call(auth, '/api/v1/records/ask', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patient_id ? { question, patient_id } : { question }),
+  });
+
+/** Your c0mpute connection: connected, status (active | locked | invalid | none), name, balance. */
+export const c0mputeStatus = (auth) => call(auth, '/api/v1/c0mpute');
+export const c0mputeDisconnect = (auth) => call(auth, '/api/v1/c0mpute', { method: 'DELETE' });
+
 /* ---------------------------------------------------- encrypted record vault -- */
 
 export const recordVaultStatus = (auth) => call(auth, '/api/v1/records/vault');
