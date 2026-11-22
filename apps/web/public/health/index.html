@@ -16,15 +16,15 @@
   <main class="wrap">
     <header class="top">
       <a class="brand" href="/">tleehealth</a>
-      <a class="account" href="/portal">My health portal</a>
+      <nav class="top-links"><a class="account" href="/providers">Find a provider</a><a class="account" href="/portal">My health portal</a></nav>
     </header>
     <section class="intro">
       <p class="eyebrow">Private health tracker</p>
       <h1>Your readings, on this device.</h1>
-      <p class="lede">Sign in to record measurements and review changes over time. Readings stay encrypted on this device and are never sent to tleehealth.</p>
+      <p class="lede">Sign in to record measurements and review changes over time. Readings stay encrypted on this device. When you choose to share them, your provider gets a link and a passkey, and tleehealth still cannot read them.</p>
     </section>
     <section class="notice" aria-label="Storage details">
-      <strong>Encrypted on this device before saving.</strong> Your passphrase and recovery key are never sent to tleehealth. Readings never reach the server. Export an encrypted backup to move them to another device. If you lose both keys, the readings cannot be recovered.
+      <strong>Encrypted on this device before saving.</strong> Your passphrase and recovery key are never sent to tleehealth. Readings stay on this device unless you share them: a share uploads a copy encrypted under a one-time passkey that only you and the person you give it to hold. Export an encrypted backup to move readings to another device. If you lose both keys, the readings cannot be recovered.
     </section>
     <section class="card" id="vault-card"><div class="card-b" id="vault-screen" aria-live="polite"></div></section>
     <div id="tracker" hidden>
@@ -50,9 +50,50 @@
         </form>
       </section>
       <section class="card readings">
-        <div class="card-head list-head"><div><p class="eyebrow">History</p><h2>Your readings</h2></div><div class="actions tools"><button type="button" id="export">Export encrypted backup</button><label class="import">Import backup<input id="import" type="file" accept="application/json,.json"></label></div></div>
+        <div class="card-head list-head"><div><p class="eyebrow">History</p><h2>Your readings</h2></div><div class="actions tools"><button type="button" class="primary" id="open-share">Share readings</button><button type="button" id="open-import-shared">Import shared readings</button><button type="button" id="export">Export encrypted backup</button><label class="import">Import backup<input id="import" type="file" accept="application/json,.json"></label></div></div>
         <p id="empty" class="empty">No readings saved yet.</p>
         <div class="table-wrap"><table id="table" hidden><thead><tr><th>Measurement</th><th>Reading</th><th>Date</th><th>Note</th><th><span class="sr-only">Action</span></th></tr></thead><tbody id="rows"></tbody></table></div>
+      </section>
+      <section class="card" id="import-shared-card" hidden>
+        <div class="card-head"><div><p class="eyebrow">Import</p><h2>Import readings someone shared with you</h2></div><button type="button" id="close-import-shared">Close</button></div>
+        <form id="import-shared-form" class="form">
+          <label class="notes">Share link<input name="link" type="text" autocomplete="off" spellcheck="false" placeholder="https://tleehealth.pwa.pit.world/share/…" required></label>
+          <label class="notes">Share passkey<input name="passkey" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" required></label>
+          <div class="actions notes"><button class="primary" type="submit">Import into my tracker</button><span class="hint" id="import-shared-status" role="status"></span></div>
+        </form>
+      </section>
+      <section class="card" id="share-card" hidden>
+        <div class="card-head"><div><p class="eyebrow">Share</p><h2>Share your readings</h2></div><button type="button" id="close-share">Close</button></div>
+        <div class="card-b" id="share-result" hidden aria-live="polite">
+          <p class="eyebrow">Share created</p>
+          <h3>Send these two things separately</h3>
+          <p class="hint">Send the link one way (email, a patient portal message) and the passkey another (a text, a phone call). Anyone holding both can read this copy of your readings until it expires or you revoke it. The passkey is shown only now.</p>
+          <label class="share-field">Link<span class="share-row"><input id="share-link" type="text" readonly><button type="button" data-copy="share-link">Copy link</button></span></label>
+          <label class="share-field">Passkey<span class="share-row"><input id="share-passkey" type="text" readonly class="mono"><button type="button" data-copy="share-passkey">Copy passkey</button></span></label>
+          <div class="actions"><button type="button" id="share-another">Create another share</button></div>
+        </div>
+        <form id="share-form" class="form">
+          <label>Your name <span>(shown to the recipient)</span><input name="from" type="text" maxlength="120" autocomplete="name"></label>
+          <label>Link expires
+            <select name="expires_days"><option value="1">In 24 hours</option><option value="7" selected>In 7 days</option><option value="30">In 30 days</option><option value="90">In 90 days</option></select>
+          </label>
+          <label class="notes">Who is it for? <span>(a private label only you can read)</span><input name="label" id="share-label" type="text" maxlength="120" autocomplete="off" placeholder="For example, Dr. Rivera, cardiology"></label>
+          <div class="notes provider-find">
+            <button type="button" class="link" id="toggle-provider-find">Find them in the provider directory</button>
+            <div id="provider-find" hidden>
+              <div class="provider-find-row"><input id="provider-q" type="search" placeholder="Provider or practice name" aria-label="Provider or practice name" autocomplete="off"><select id="provider-state" aria-label="State"><option value="">Any state</option></select><button type="button" id="provider-search">Search</button></div>
+              <p class="hint" id="provider-status" role="status"></p>
+              <ul class="provider-results" id="provider-results"></ul>
+            </div>
+          </div>
+          <label class="notes">Message <span>(optional, encrypted with the readings)</span><textarea name="message" maxlength="500" rows="2" placeholder="For example, home readings for my visit on the 14th"></textarea></label>
+          <div class="actions notes"><button class="primary" type="submit" id="share-submit">Create share link</button><span class="hint" id="share-status" role="status"></span></div>
+        </form>
+        <div class="card-b shares-list">
+          <h3>Active shares</h3>
+          <p class="hint" id="shares-empty">Nothing is shared right now.</p>
+          <ul id="shares"></ul>
+        </div>
       </section>
       <footer><span>For tracking only. This is not a diagnosis or medical advice.</span><button type="button" class="clear" id="clear">Delete all readings</button></footer>
     </div>

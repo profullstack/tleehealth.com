@@ -44,7 +44,9 @@ an AI tool.
 - There is no desktop application in this repository. The CLI is the current
   native-client path.
 - E2EE chat is not provided by this vault.
-- Sharing and multi-user key envelopes are not implemented.
+- Sharing and multi-user key envelopes are not implemented for vault files.
+  Health tracker readings can be shared under a one-time passkey; see
+  [health-tracker-sharing.md](health-tracker-sharing.md).
 
 Do not migrate or delete legacy records silently. A future migration must let
 the user encrypt and verify the count and hashes locally, explain backup

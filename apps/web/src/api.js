@@ -11,6 +11,8 @@ import * as nav from './navigation.js';
 import * as records from './records.js';
 import * as recordVault from './record-vault.js';
 import * as credits from './credits.js';
+import * as healthShares from './health-shares.js';
+import * as providers from './providers.js';
 
 /**
  * /api/v1: the only thing any client talks to. The browser app, the CLI, the TUI
@@ -37,7 +39,8 @@ const fail = (status, message) => {
 };
 
 api.onError((err, c) => {
-  if (err instanceof HttpError || err instanceof records.RecordsError || err instanceof recordVault.RecordVaultError) {
+  if (err instanceof HttpError || err instanceof records.RecordsError || err instanceof recordVault.RecordVaultError
+    || err instanceof healthShares.HealthShareError || err instanceof providers.ProvidersError) {
     return c.json({ error: err.message }, err.status);
   }
   if (err?.code === '23505') return c.json({ error: 'that already exists' }, 409);
@@ -1381,6 +1384,53 @@ api.get('/orgs/:org/patients/:pid/records/files/:id', async (c) => {
   const f = await records.file(null, uuid(c.req.param('id')), { orgId: me.org_id, patientId: p.id });
   await audit(me.org_id, user.id, 'records.file', p.id);
   return download(c, f);
+});
+
+/* ------------------------------------------- shared tracker readings -- */
+// The tracker encrypts a snapshot under a one-time share passkey before it
+// leaves the browser. These routes move opaque bytes and cannot read them.
+
+api.get('/health/shares', async (c) => {
+  const user = await requireUser(c);
+  return c.json({ shares: await healthShares.listShares(user.id), expiry_days: healthShares.EXPIRY_DAYS });
+});
+
+api.post('/health/shares', async (c) => {
+  const user = await requireUser(c);
+  const share = await healthShares.createShare(user.id, await body(c));
+  return c.json({ share: { ...share, url: `${config.siteUrl}/share/${share.id}` } }, 201);
+});
+
+api.delete('/health/shares/:id', async (c) => {
+  const user = await requireUser(c);
+  await healthShares.revokeShare(user.id, c.req.param('id'));
+  return c.json({ ok: true });
+});
+
+// Public: the link holder fetches ciphertext and opens it locally with the
+// passkey. No account, and nothing here reveals who shared it.
+api.get('/shared/:id', async (c) => {
+  if (!healthShares.rateLimit(`shared:${healthShares.clientAddress(c)}`, 40, 10 * 60_000)) fail(429, 'Too many requests. Try again in a few minutes.');
+  return c.json(await healthShares.fetchShare(c.req.param('id')));
+});
+
+/* --------------------------------------------------- provider directory -- */
+
+const providerLimit = (c) => {
+  if (!healthShares.rateLimit(`providers:${healthShares.clientAddress(c)}`, 90, 60_000)) fail(429, 'Too many searches. Try again in a minute.');
+};
+
+api.get('/providers/specialties', (c) =>
+  c.json({ specialties: providers.SPECIALTIES.map(({ id, label }) => ({ id, label })), states: providers.STATES, source: providers.SOURCE }));
+
+api.get('/providers', async (c) => {
+  providerLimit(c);
+  return c.json(await providers.searchProviders(c.req.query()));
+});
+
+api.get('/providers/:npi', async (c) => {
+  providerLimit(c);
+  return c.json(await providers.getProvider(c.req.param('npi')));
 });
 
 /* ---------------------------------------------------------------- portal -- */

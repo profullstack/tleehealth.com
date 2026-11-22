@@ -22,13 +22,14 @@ const root = join(here, '..', '..', '..');
 const VERSION = JSON.parse(readFileSync(join(root, 'packages/cli/package.json'), 'utf8')).version;
 const INSTALL_SH = readFileSync(join(root, 'bin/install.sh'), 'utf8');
 const RECORD_VAULT_CRYPTO_JS = readFileSync(join(root, 'packages/cli/src/vault-crypto.js'));
+const SHARE_FORMAT_JS = readFileSync(join(root, 'packages/cli/src/share-format.js'));
 
 export const app = new Hono();
 
 app.use('*', async (c, next) => {
   await next();
   c.header('x-content-type-options', 'nosniff');
-  c.header('referrer-policy', 'strict-origin-when-cross-origin');
+  if (!c.res.headers.has('referrer-policy')) c.header('referrer-policy', 'strict-origin-when-cross-origin');
   if (c.req.path.startsWith('/api/')) c.header('cache-control', 'no-store');
 });
 
@@ -107,6 +108,34 @@ app.get('/assets/units.js', asset('units.js', 'text/javascript; charset=utf-8'))
 app.get('/assets/vault-crypto.js', (c) =>
   c.body(RECORD_VAULT_CRYPTO_JS, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
 );
+// Sharing: the module that seals and opens a share (also the CLI's), the
+// public page a link holder opens, and the stylesheet both pages share with
+// the tracker. The share page carries no footer, tracker or third-party code:
+// it is where someone's readings get decrypted.
+const js = (bytes) => (c) =>
+  c.body(bytes, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' });
+app.get('/assets/share-format.js', js(SHARE_FORMAT_JS));
+app.get('/assets/share.js', (c) => js(pub('share/share.js'))(c));
+app.get('/assets/providers.js', (c) => js(pub('providers/providers.js'))(c));
+app.get('/assets/tracker.css', (c) =>
+  c.body(pub('health/health.css'), 200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'no-cache' }),
+);
+app.get('/share/:id', (c) =>
+  c.body(pub('share/index.html'), 200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'private, no-store',
+    'referrer-policy': 'no-referrer',
+    'x-robots-tag': 'noindex, nofollow',
+    'content-security-policy':
+      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  }),
+);
+
+// The provider directory: public and indexable. One page renders search and
+// each provider's record from /api/v1/providers.
+app.get('/providers', (c) => page(c, 'providers/index.html'));
+app.get('/providers/:npi{[0-9]{10}}', (c) => page(c, 'providers/index.html'));
+
 // The signup form's company-from-work-email helper, from @profullstack/profile.
 app.get('/assets/profile.js', (c) =>
   c.body(PROFILE_ENHANCE_SCRIPT, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }),
@@ -377,7 +406,11 @@ Authenticate with a session cookie or \`Authorization: Bearer th_live_...\` (cre
 - PUT /records/connections/:id/share        {"org_id","shared"}: show a connection to a practice you are a patient of
 - GET /records/export?format=zip|bundle     download everything: readable files + raw FHIR, or one FHIR Bundle
 - GET /orgs/:org/patients/:id/records       what that patient shared with the practice (audit-logged)
-- GET|PUT /orgs/:org/call-settings          AI calls: on/off, hours before/after, calling window, attempts
+- GET /providers?q=&specialty=&city=&state=&zip=&type=&page=   the provider directory: every US clinician and organization with an NPI (no key needed)
+- GET /providers/:npi, GET /providers/specialties              one provider; the specialty ids and states the search takes
+- GET|POST /health/shares, DELETE /health/shares/:id            health tracker shares: ciphertext sealed in the browser under a one-time passkey
+- GET /shared/:id                                              the encrypted share behind a link (no key needed; the passkey opens it locally)
+- GET|PUT /orgs/:org/call-settings         AI calls: on/off, hours before/after, calling window, attempts
 - POST /orgs/:org/appointments/:id/call     call the patient now ({"kind":"reminder"|"followup"})
 - GET /credits, POST /credits/redeem {code, org_id?}, POST /orgs/:org/billing/apply-credits {days}   credit codes: days of a practice's paid plan
 - GET|POST /invites, POST /invites/accept {code}   invites: 3 per account, both sides get 7 days; landing page /i/<code>

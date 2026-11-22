@@ -1,6 +1,6 @@
 {
   "name": "@profullstack/tleehealth",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "description": "tleehealth from the terminal: the CLI, the front-desk TUI, and the API client the MCP server uses.",
   "type": "module",
   "license": "MIT",
@@ -20,7 +20,8 @@
   "exports": {
     ".": "./src/cli.js",
     "./client": "./src/client.js",
-    "./vault": "./src/vault-crypto.js"
+    "./vault": "./src/vault-crypto.js",
+    "./share": "./src/share-format.js"
   },
   "files": [
     "bin",
